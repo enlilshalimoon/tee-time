@@ -17,7 +17,6 @@ import { CourseConfig, CourseResult } from "./types";
 import { parseBookingUrl, ParsedCourse } from "./url-parser";
 import { addCourse, getAllCourses, removeCourseByIndex, updateCourseByIndex } from "./config-store";
 import { checkAllCourses } from "./checker";
-import { filterNewlyOpened } from "./change-detector";
 import { sendNotification } from "./notifier";
 
 // ---------------------------------------------------------------------------
@@ -211,11 +210,10 @@ async function handleCheck(chatId: string): Promise<void> {
   await sendMessage(chatId, `Checking ${courses.length} course(s)…`);
   try {
     const allResults = await checkAllCourses(courses);
-    const newResults = filterNewlyOpened(allResults);
-    if (newResults.length === 0) {
-      await sendMessage(chatId, "No newly opened tee times right now.");
+    if (allResults.length === 0) {
+      await sendMessage(chatId, "No tee times found right now across all courses.");
     } else {
-      await sendNotification(newResults);
+      await sendNotification(allResults);
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
