@@ -16,6 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpango-1.0-0 \
     libcairo2 \
     libasound2 \
+    libxfixes3 \
     libxshmfence1 \
     fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
