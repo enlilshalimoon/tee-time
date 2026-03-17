@@ -23,6 +23,7 @@ import { sendNotification } from "./notifier";
 
 let BOT_TOKEN = "";
 let CHAT_ID = "";
+let ALLOWED_CHATS: Set<string> = new Set(); // empty = allow all
 const TG = () => `https://api.telegram.org/bot${BOT_TOKEN}`;
 
 async function sendMessage(chatId: string, text: string): Promise<void> {
@@ -371,6 +372,14 @@ export async function startTelegramBot(): Promise<void> {
   BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? "";
   CHAT_ID = process.env.TELEGRAM_CHAT_ID ?? "";
 
+  // TELEGRAM_ALLOWED_CHATS = comma-separated chat IDs that may use the bot.
+  // If unset, the bot is open to everyone.  Set it to lock down to specific
+  // users/groups, e.g.: TELEGRAM_ALLOWED_CHATS=-1001234567890,987654321
+  const rawAllowed = process.env.TELEGRAM_ALLOWED_CHATS ?? "";
+  ALLOWED_CHATS = rawAllowed
+    ? new Set(rawAllowed.split(",").map((s) => s.trim()).filter(Boolean))
+    : new Set();
+
   if (!BOT_TOKEN) {
     console.error("[bot] TELEGRAM_BOT_TOKEN not set — bot disabled");
     return;
@@ -403,8 +412,8 @@ export async function startTelegramBot(): Promise<void> {
 
         const chatId = String(msg.chat.id);
 
-        if (CHAT_ID && chatId !== CHAT_ID) {
-          await sendMessage(chatId, "Sorry, I'm a private bot.");
+        if (ALLOWED_CHATS.size > 0 && !ALLOWED_CHATS.has(chatId)) {
+          await sendMessage(chatId, "Sorry, this bot is private. Ask the owner to add your chat ID.");
           continue;
         }
 
