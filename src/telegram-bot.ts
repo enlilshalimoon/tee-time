@@ -215,7 +215,7 @@ async function handleCheck(chatId: string): Promise<void> {
       await sendMessage(chatId, "No tee times available right now.");
     } else {
       if (results.length > 0) {
-        await sendNotification(results);
+        await sendNotification(results, chatId);
       } else {
         await sendMessage(chatId, "No tee times found in your time window.");
       }
@@ -257,7 +257,7 @@ async function handleTest(chatId: string): Promise<void> {
     };
   });
 
-  await sendNotification(fakeResults);
+  await sendNotification(fakeResults, chatId);
 }
 
 async function handleEdit(chatId: string, args: string): Promise<void> {

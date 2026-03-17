@@ -82,11 +82,11 @@ function escMd(text: string): string {
 }
 void escMd; // unused for now — keeping Markdown (not V2) mode
 
-export async function sendNotification(results: CourseResult[]): Promise<void> {
+export async function sendNotification(results: CourseResult[], overrideChatId?: string): Promise<void> {
   if (results.length === 0) return;
 
   const token = process.env.TELEGRAM_BOT_TOKEN;
-  const chatId = process.env.TELEGRAM_CHAT_ID;
+  const chatId = overrideChatId ?? process.env.TELEGRAM_CHAT_ID;
 
   if (!token || !chatId) {
     throw new Error("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be set in .env");

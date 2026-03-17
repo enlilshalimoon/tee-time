@@ -37,9 +37,12 @@ function getDatesToCheck(): string[] {
   return dates;
 }
 
+const ABSOLUTE_EARLIEST = "06:00"; // no golf course opens before 6am
+
 function isTimeInWindow(time: string, earliest?: string, latest?: string): boolean {
-  if (!earliest && !latest) return true;
   const t = time.slice(0, 5);
+  if (t < ABSOLUTE_EARLIEST) return false;
+  if (!earliest && !latest) return true;
   if (earliest && t < earliest) return false;
   if (latest && t > latest) return false;
   return true;

@@ -122,6 +122,11 @@ const PRICE_KEYS = [
   "GreenFee", "Price", "displayPrice",
 ];
 
+const HOLES_KEYS = [
+  "holes", "numHoles", "num_holes", "numberOfHoles", "number_of_holes",
+  "holeCount", "hole_count", "Holes", "NumHoles",
+];
+
 function normalizeTime(raw: string): string {
   // "7:00 AM" / "7:00am" → "07:00"
   const ampm = raw.match(/(\d{1,2}):(\d{2})\s*([APap][Mm]?)/);
@@ -201,10 +206,15 @@ function extractFromJson(data: unknown): TeeTime[] | null {
         if (typeof inner === "number") price = inner;
       }
 
+      const rawHoles = pickField<unknown>(item, HOLES_KEYS);
+      const holes = typeof rawHoles === "number" ? rawHoles
+        : typeof rawHoles === "string" ? parseInt(rawHoles, 10) || 18
+        : 18;
+
       times.push({
         time: normalizeTime(String(rawTime)),
         players: typeof avail === "number" ? avail : 4,
-        holes: 18,
+        holes,
         price,
       });
     }
@@ -229,6 +239,7 @@ async function extractFromDOM(page: Page): Promise<TeeTime[]> {
     var timeRe = /\\b(\\d{1,2}:\\d{2}\\s*(?:AM|PM|am|pm|a\\.?m\\.?|p\\.?m\\.?)?)\\b/;
     var priceRe = /\\$\\s*(\\d+(?:\\.\\d{2})?)/;
     var availRe = /(\\d+)\\s*(?:spot|player|slot|available|open|avail)/i;
+    var holesRe = /\\b(9|18)\\s*-?\\s*hole/i;
 
     var els = document.querySelectorAll("td, li, div, span, a, p, button");
     for (var i = 0; i < els.length; i++) {
@@ -246,11 +257,12 @@ async function extractFromDOM(page: Page): Promise<TeeTime[]> {
       var parentText = el.parentElement ? (el.parentElement.innerText || "") : text;
       var pmatch = parentText.match(priceRe);
       var amatch = parentText.match(availRe);
+      var hmatch = parentText.match(holesRe);
 
       results.push({
         time: timeStr,
         players: amatch ? parseInt(amatch[1], 10) : 4,
-        holes: 18,
+        holes: hmatch ? parseInt(hmatch[1], 10) : 18,
         price: pmatch ? parseFloat(pmatch[1]) : undefined
       });
     }

@@ -40,7 +40,8 @@
       "bookingUrl": "https://los-verdes-golf-course-public.book.teeitup.com/teetimes",
       "earliestTime": "05:00",
       "latestTime": "15:00",
-      "daysOfWeek": [6, 0]
+      "daysOfWeek": [6, 0],
+      "minHoles": 18
     },
     {
       "name": "LA City Golf",
