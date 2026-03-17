@@ -1,29 +1,9 @@
 # Nixpacks config for Railway
 #
-# We skip the Chrome download during `npm ci` (which can time out on slow
-# build runners) and instead run `npx puppeteer browsers install chrome`
-# explicitly in the build phase. Chrome is cached at ~/.cache/puppeteer/
-# and Puppeteer finds it there automatically at runtime.
-
-[phases.setup]
-aptPkgs = [
-  # Runtime libraries needed by Chrome's sandbox and renderer
-  "libnss3",
-  "libatk1.0-0",
-  "libatk-bridge2.0-0",
-  "libcups2",
-  "libdrm2",
-  "libxkbcommon0",
-  "libxcomposite1",
-  "libxdamage1",
-  "libxrandr2",
-  "libgbm1",
-  "libpango-1.0-0",
-  "libcairo2",
-  "libasound2t64",
-  "libxshmfence1",
-  "fonts-liberation",
-]
+# Puppeteer's downloaded Chrome bundles its own shared libraries, so no
+# extra apt packages are needed. We skip the Chrome download during
+# `npm ci` (which can time out) and instead run it explicitly in the
+# build phase so it's baked into the image.
 
 [phases.install]
 # PUPPETEER_SKIP_DOWNLOAD prevents the postinstall hook from downloading Chrome
