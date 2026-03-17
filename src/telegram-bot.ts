@@ -15,7 +15,7 @@
 import axios from "axios";
 import { CourseConfig, CourseResult } from "./types";
 import { parseBookingUrl, ParsedCourse } from "./url-parser";
-import { addCourse, getAllCourses, removeCourseByIndex } from "./config-store";
+import { addCourse, getAllCourses, removeCourseByIndex, updateCourseByIndex } from "./config-store";
 import { checkAllCourses } from "./checker";
 import { filterNewlyOpened } from "./change-detector";
 import { sendNotification } from "./notifier";
@@ -69,7 +69,10 @@ type Step =
   | { name: "awaiting_urls" }
   | { name: "awaiting_name"; entries: ParsedEntry[]; currentIdx: number }
   | { name: "awaiting_time"; entries: ParsedEntry[] }
-  | { name: "awaiting_days"; entries: ParsedEntry[]; earliest?: string; latest?: string };
+  | { name: "awaiting_days"; entries: ParsedEntry[]; earliest?: string; latest?: string }
+  | { name: "awaiting_edit_field"; courseIdx: number }
+  | { name: "awaiting_edit_time"; courseIdx: number }
+  | { name: "awaiting_edit_days"; courseIdx: number; earliest?: string; latest?: string };
 
 const sessions = new Map<string, Step>();
 function getSession(chatId: string): Step {
@@ -145,6 +148,7 @@ async function handleHelp(chatId: string): Promise<void> {
     `*Commands:*\n` +
     `/add — add courses (paste multiple URLs at once)\n` +
     `/list — show monitored courses\n` +
+    `/edit <number> — change times or days for a course\n` +
     `/remove <number> — stop monitoring a course\n` +
     `/check — run a manual check right now\n` +
     `/test — send a fake alert to preview notifications\n` +
@@ -244,6 +248,110 @@ async function handleTest(chatId: string): Promise<void> {
   });
 
   await sendNotification(fakeResults);
+}
+
+async function handleEdit(chatId: string, args: string): Promise<void> {
+  const idx = parseInt(args.trim(), 10) - 1;
+  if (isNaN(idx)) {
+    await sendMessage(chatId, "Usage: `/edit 1` — use /list to see numbers.");
+    return;
+  }
+  const courses = getAllCourses();
+  if (idx < 0 || idx >= courses.length) {
+    await sendMessage(chatId, `No course at #${idx + 1}. Use /list.`);
+    return;
+  }
+  const c = courses[idx];
+  const time =
+    c.earliestTime && c.latestTime ? `${c.earliestTime}–${c.latestTime}`
+    : c.earliestTime ? `after ${c.earliestTime}`
+    : c.latestTime ? `before ${c.latestTime}`
+    : "any time";
+  const days = c.daysOfWeek ? formatDays(c.daysOfWeek) : "every day";
+
+  await sendMessage(
+    chatId,
+    `Editing *${c.name}*\n` +
+    `Current: ${time} · ${days}\n\n` +
+    `What do you want to change?\n` +
+    `• \`time\` — change the time window\n` +
+    `• \`days\` — change the days\n` +
+    `• \`both\` — change time and days`
+  );
+  setSession(chatId, { name: "awaiting_edit_field", courseIdx: idx });
+}
+
+async function handleAwaitingEditField(
+  chatId: string,
+  text: string,
+  session: Extract<Step, { name: "awaiting_edit_field" }>
+): Promise<void> {
+  const s = text.trim().toLowerCase();
+  if (s === "time" || s === "both") {
+    await sendMessage(chatId, `New *time window*? (e.g. \`5am-3pm\`, \`07:00-15:00\`, or \`any\`)`);
+    setSession(chatId, { name: "awaiting_edit_time", courseIdx: session.courseIdx });
+  } else if (s === "days") {
+    await sendMessage(chatId, `New *days*? (\`weekends\`, \`weekdays\`, \`fri sat sun\`, or \`all\`)`);
+    setSession(chatId, { name: "awaiting_edit_days", courseIdx: session.courseIdx });
+  } else {
+    await sendMessage(chatId, `Reply with \`time\`, \`days\`, or \`both\`.`);
+  }
+}
+
+async function handleAwaitingEditTime(
+  chatId: string,
+  text: string,
+  session: Extract<Step, { name: "awaiting_edit_time" }>
+): Promise<void> {
+  const window = parseTimeWindow(text);
+  if (window === null) {
+    await sendMessage(chatId, `Try \`5am-3pm\`, \`07:00-15:00\`, or \`any\`.`);
+    return;
+  }
+  // Check if we were in "both" mode (came from awaiting_edit_field with "both")
+  // We handle this by going to awaiting_edit_days next
+  await sendMessage(chatId, `New *days*? (\`weekends\`, \`weekdays\`, \`fri sat sun\`, or \`all\`)`);
+  setSession(chatId, {
+    name: "awaiting_edit_days",
+    courseIdx: session.courseIdx,
+    earliest: window.earliest,
+    latest: window.latest,
+  });
+}
+
+async function handleAwaitingEditDays(
+  chatId: string,
+  text: string,
+  session: Extract<Step, { name: "awaiting_edit_days" }>
+): Promise<void> {
+  const days = parseDays(text);
+  if (days === null) {
+    await sendMessage(chatId, `Try \`weekends\`, \`weekdays\`, \`fri sat\`, or \`all\`.`);
+    return;
+  }
+
+  const updates: Parameters<typeof updateCourseByIndex>[1] = {
+    earliestTime: session.earliest,
+    latestTime: session.latest,
+    daysOfWeek: days.length > 0 ? days : undefined,
+  };
+
+  const updated = updateCourseByIndex(session.courseIdx, updates);
+  setSession(chatId, { name: "idle" });
+
+  if (!updated) {
+    await sendMessage(chatId, "Couldn't update — course not found. Use /list.");
+    return;
+  }
+
+  const time =
+    updated.earliestTime && updated.latestTime ? `${updated.earliestTime}–${updated.latestTime}`
+    : updated.earliestTime ? `after ${updated.earliestTime}`
+    : updated.latestTime ? `before ${updated.latestTime}`
+    : "any time";
+  const daysLabel = updated.daysOfWeek ? formatDays(updated.daysOfWeek) : "every day";
+
+  await sendMessage(chatId, `✅ Updated *${updated.name}*\nNow monitoring *${daysLabel}*, *${time}*.`);
 }
 
 // ---------------------------------------------------------------------------
@@ -413,6 +521,7 @@ async function handleMessage(chatId: string, text: string): Promise<void> {
   if (cmd === "/list") return handleList(chatId);
   if (cmd === "/check") return handleCheck(chatId);
   if (cmd === "/test") return handleTest(chatId);
+  if (cmd === "/edit") return handleEdit(chatId, t.replace(/^\/edit\S*/i, ""));
   if (cmd === "/remove") return handleRemove(chatId, t.replace(/^\/remove\S*/i, ""));
   if (cmd === "/cancel") {
     setSession(chatId, { name: "idle" });
@@ -426,6 +535,9 @@ async function handleMessage(chatId: string, text: string): Promise<void> {
   if (session.name === "awaiting_name") return handleAwaitingName(chatId, t, session);
   if (session.name === "awaiting_time") return handleAwaitingTime(chatId, t, session);
   if (session.name === "awaiting_days") return handleAwaitingDays(chatId, t, session);
+  if (session.name === "awaiting_edit_field") return handleAwaitingEditField(chatId, t, session);
+  if (session.name === "awaiting_edit_time") return handleAwaitingEditTime(chatId, t, session);
+  if (session.name === "awaiting_edit_days") return handleAwaitingEditDays(chatId, t, session);
 
   // Silent — don't respond to random messages
 }
