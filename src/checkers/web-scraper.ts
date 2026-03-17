@@ -125,7 +125,16 @@ function substituteDate(url: string, targetDate: string): string {
     return url.replace(mdyEncoded, `$1${month}%2F${day}%2F${year}`);
   }
 
-  // No date param found — append one as a query param (best-effort)
+  // No date param found — append one as a query param (best-effort).
+  // If the URL has a hash fragment (#...) the query param must go BEFORE the
+  // hash, otherwise it ends up inside the fragment and the server never sees it.
+  const hashIdx = url.indexOf("#");
+  if (hashIdx >= 0) {
+    const base = url.slice(0, hashIdx);
+    const hash = url.slice(hashIdx);
+    const sep = base.includes("?") ? "&" : "?";
+    return `${base}${sep}date=${targetDate}${hash}`;
+  }
   const sep = url.includes("?") ? "&" : "?";
   return `${url}${sep}date=${targetDate}`;
 }
