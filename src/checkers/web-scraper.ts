@@ -28,9 +28,6 @@ async function getBrowser(): Promise<Browser> {
 
   browser = await puppeteer.launch({
     headless: true,
-    // On Railway (and other Linux servers) we use the system Chromium instead
-    // of Puppeteer's bundled Chrome (set via PUPPETEER_EXECUTABLE_PATH env var).
-    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",

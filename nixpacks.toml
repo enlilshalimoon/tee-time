@@ -1,19 +1,41 @@
 # Nixpacks config for Railway
-# Uses the system Chromium package instead of Puppeteer's bundled Chrome,
-# which avoids a ~300MB download during npm install that can time out.
+#
+# We skip the Chrome download during `npm ci` (which can time out on slow
+# build runners) and instead run `npx puppeteer browsers install chrome`
+# explicitly in the build phase. Chrome is cached at ~/.cache/puppeteer/
+# and Puppeteer finds it there automatically at runtime.
 
 [phases.setup]
-aptPkgs = ["chromium"]
+aptPkgs = [
+  # Runtime libraries needed by Chrome's sandbox and renderer
+  "libnss3",
+  "libatk1.0-0",
+  "libatk-bridge2.0-0",
+  "libcups2",
+  "libdrm2",
+  "libxkbcommon0",
+  "libxcomposite1",
+  "libxdamage1",
+  "libxrandr2",
+  "libgbm1",
+  "libpango-1.0-0",
+  "libcairo2",
+  "libasound2",
+  "libxshmfence1",
+  "fonts-liberation",
+]
 
 [phases.install]
-cmds = ["npm ci"]
+# PUPPETEER_SKIP_DOWNLOAD prevents the postinstall hook from downloading Chrome
+# (it would time out). We download Chrome explicitly in the build phase instead.
+cmds = ["PUPPETEER_SKIP_DOWNLOAD=true npm ci"]
 
 [phases.build]
-cmds = ["npm run build"]
-
-[variables]
-PUPPETEER_SKIP_DOWNLOAD = "true"
-PUPPETEER_EXECUTABLE_PATH = "/usr/bin/chromium"
+cmds = [
+  # Download Chrome into ~/.cache/puppeteer (Puppeteer finds it automatically)
+  "npx puppeteer browsers install chrome",
+  "npm run build",
+]
 
 [start]
 cmd = "npm start"
