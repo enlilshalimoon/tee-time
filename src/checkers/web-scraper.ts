@@ -26,6 +26,10 @@ let browser: Browser | null = null;
 async function getBrowser(): Promise<Browser> {
   if (browser && browser.connected) return browser;
 
+  // Clear any stale PUPPETEER_EXECUTABLE_PATH so Puppeteer uses its own
+  // downloaded Chrome from ~/.cache/puppeteer rather than a system path.
+  delete process.env.PUPPETEER_EXECUTABLE_PATH;
+
   browser = await puppeteer.launch({
     headless: true,
     args: [
