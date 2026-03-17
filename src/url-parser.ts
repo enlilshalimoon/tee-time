@@ -1,6 +1,6 @@
 /**
  * Parses a golf booking page URL and extracts platform + course IDs.
- * Supports ForeUp, TeeSnap, and EZLinks/GolfNow URL formats.
+ * Supports ForeUp, TeeSnap, and Chronogolf/Lightspeed Golf URL formats.
  */
 
 import axios from "axios";
@@ -14,7 +14,6 @@ import { CourseConfig, Platform } from "./types";
 //         https://someclub.book.teeitup.golf/index.php/booking/21903/9285
 function parseForeUp(url: URL): Partial<CourseConfig> | null {
   const parts = url.pathname.split("/").filter(Boolean);
-  // ['index.php', 'booking', '21903', '9285']
   const bookingIdx = parts.indexOf("booking");
   if (bookingIdx === -1) return null;
   const scheduleId = parts[bookingIdx + 1];
@@ -24,6 +23,7 @@ function parseForeUp(url: URL): Partial<CourseConfig> | null {
     platform: "foreup",
     foreupScheduleId: scheduleId,
     ...(bookingClass && /^\d+$/.test(bookingClass) ? { foreupBookingClass: bookingClass } : {}),
+    bookingUrl: url.toString(),
   };
 }
 
@@ -34,24 +34,32 @@ function parseTeeSnap(url: URL): Partial<CourseConfig> | null {
     url.searchParams.get("courseid") ||
     url.pathname.split("/").find((p) => /^\d{4,}$/.test(p));
   if (!courseId) return null;
-  return { platform: "teesnap", tesnapCourseId: courseId };
+  return { platform: "teesnap", tesnapCourseId: courseId, bookingUrl: url.toString() };
 }
 
-// EZLinks: https://www.ezlinksgolf.com/index.html#/search?fc=67890
-function parseEZLinks(url: URL): Partial<CourseConfig> | null {
-  // EZLinks puts params in the hash fragment
-  const hashQuery = url.hash.includes("?") ? url.hash.split("?")[1] : "";
-  const hashParams = new URLSearchParams(hashQuery);
-  const facilityId =
-    hashParams.get("fc") ||
-    url.searchParams.get("facilityId") ||
-    url.searchParams.get("fc");
-  if (!facilityId) return null;
-  return {
-    platform: "ezlinks",
-    ezlinksFacilityId: facilityId,
-    ezlinksBookingUrl: url.toString(),
-  };
+// Chronogolf: https://www.chronogolf.com/club/robinson-ranch/widget
+//             https://golf.lightspeedhq.com/clubs/1234/tee-times
+function parseChronogolf(url: URL): Partial<CourseConfig> | null {
+  const host = url.hostname.toLowerCase();
+
+  if (host.includes("chronogolf")) {
+    // /club/{slug}/...
+    const parts = url.pathname.split("/").filter(Boolean);
+    const clubIdx = parts.indexOf("club");
+    const clubId = clubIdx !== -1 ? parts[clubIdx + 1] : null;
+    if (!clubId) return null;
+    return { platform: "chronogolf", chronogolfClubId: clubId, bookingUrl: url.toString() };
+  }
+
+  if (host.includes("lightspeedhq") || host.includes("lightspeedgolf")) {
+    const parts = url.pathname.split("/").filter(Boolean);
+    const clubsIdx = parts.indexOf("clubs");
+    const clubId = clubsIdx !== -1 ? parts[clubsIdx + 1] : null;
+    if (!clubId) return null;
+    return { platform: "chronogolf", chronogolfClubId: clubId, bookingUrl: url.toString() };
+  }
+
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -65,7 +73,6 @@ export interface ParsedCourse {
 }
 
 export async function parseBookingUrl(raw: string): Promise<ParsedCourse | null> {
-  // Ensure scheme present so URL constructor works
   const withScheme = raw.startsWith("http") ? raw : `https://${raw}`;
   let url: URL;
   try {
@@ -81,23 +88,18 @@ export async function parseBookingUrl(raw: string): Promise<ParsedCourse | null>
     partial = parseForeUp(url);
   } else if (host.includes("teesnap")) {
     partial = parseTeeSnap(url);
-  } else if (host.includes("ezlinks") || host.includes("golfnow")) {
-    partial = parseEZLinks(url);
+  } else if (host.includes("chronogolf") || host.includes("lightspeedhq") || host.includes("lightspeedgolf")) {
+    partial = parseChronogolf(url);
   }
 
   if (!partial || !partial.platform) return null;
 
   const suggestedName = await tryFetchCourseName(partial);
-
-  return {
-    partial,
-    platform: partial.platform,
-    suggestedName,
-  };
+  return { partial, platform: partial.platform, suggestedName };
 }
 
 // ---------------------------------------------------------------------------
-// Try to get a human-readable course name from the platform API
+// Fetch a human-readable course name from the platform API
 // ---------------------------------------------------------------------------
 
 interface ForeUpFacility {
@@ -109,27 +111,22 @@ interface ForeUpFacility {
 async function tryFetchCourseName(partial: Partial<CourseConfig>): Promise<string> {
   try {
     if (partial.platform === "foreup" && partial.foreupScheduleId) {
-      // ForeUp facility endpoint
       const resp = await axios.get<ForeUpFacility>(
         `https://foreupsoftware.com/index.php/api/booking/${partial.foreupScheduleId}/facility`,
         { timeout: 8_000 }
       );
-      const name =
-        resp.data?.name ||
-        resp.data?.facility_name ||
-        resp.data?.course_name;
+      const name = resp.data?.name || resp.data?.facility_name || resp.data?.course_name;
       if (name) return name as string;
     }
   } catch {
-    // ignore — fall through to generic name
+    // ignore
   }
 
-  // Fallback generic names
   if (partial.platform === "foreup")
     return `Course (ForeUp #${partial.foreupScheduleId})`;
   if (partial.platform === "teesnap")
     return `Course (TeeSnap #${partial.tesnapCourseId})`;
-  if (partial.platform === "ezlinks")
-    return `Course (EZLinks #${partial.ezlinksFacilityId})`;
+  if (partial.platform === "chronogolf")
+    return `Course (Chronogolf: ${partial.chronogolfClubId})`;
   return "Golf Course";
 }

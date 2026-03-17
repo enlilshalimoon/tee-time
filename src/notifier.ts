@@ -1,29 +1,71 @@
 import axios from "axios";
-import { CourseResult, TeeTime } from "./types";
+import { CourseResult } from "./types";
 
-function buildMessage(results: CourseResult[]): string {
-  const lines: string[] = ["⛳ *Tee Times Available!*\n"];
+// ---------------------------------------------------------------------------
+// Natural-language message builder
+// ---------------------------------------------------------------------------
 
-  for (const result of results) {
-    lines.push(`*${escMd(result.course.name)}* — ${result.date}`);
+const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
 
-    for (const tt of result.teeTimes) {
-      let line = `  🕐 ${tt.time}  ·  ${tt.players} spot(s)  ·  ${tt.holes}h`;
-      if (tt.price !== undefined) line += `  ·  $${tt.price.toFixed(2)}`;
-      if (tt.bookingUrl) line += `\n  [Book now](${tt.bookingUrl})`;
-      lines.push(line);
-    }
-
-    lines.push("");
-  }
-
-  return lines.join("\n");
+/** "2026-03-29" → "Sunday, March 29" */
+function friendlyDate(dateStr: string): string {
+  // Parse as local noon to avoid DST shift
+  const d = new Date(`${dateStr}T12:00:00`);
+  return `${DAY_NAMES[d.getDay()]}, ${MONTH_NAMES[d.getMonth()]} ${d.getDate()}`;
 }
 
+/** "09:00" → "9:00 AM" */
+function friendlyTime(hhmm: string): string {
+  const [hStr, mStr] = hhmm.split(":");
+  const h = parseInt(hStr, 10);
+  const m = parseInt(mStr, 10);
+  const ampm = h >= 12 ? "PM" : "AM";
+  const hour = h % 12 || 12;
+  return `${hour}:${String(m).padStart(2, "0")} ${ampm}`;
+}
+
+function buildMessage(results: CourseResult[]): string {
+  const lines: string[] = [];
+
+  for (const result of results) {
+    const dateLine = friendlyDate(result.date);
+
+    for (const tt of result.teeTimes) {
+      const timeStr = friendlyTime(tt.time);
+      const spotsStr = tt.players === 1 ? "1 spot" : `${tt.players} spots`;
+      const priceStr = tt.price !== undefined ? ` · $${tt.price.toFixed(0)}` : "";
+
+      let line =
+        `⛳ *${result.course.name}* just opened for *${dateLine}* at *${timeStr}*` +
+        ` (${spotsStr}${priceStr})`;
+
+      // Prefer the deep booking link on the slot, fall back to course booking page
+      const bookLink = tt.bookingUrl ?? result.course.bookingUrl;
+      if (bookLink) {
+        line += `\n[Book now →](${bookLink})`;
+      }
+
+      lines.push(line);
+    }
+  }
+
+  return lines.join("\n\n");
+}
+
+// ---------------------------------------------------------------------------
+// Telegram sender
+// ---------------------------------------------------------------------------
+
 // Escape special chars for Telegram MarkdownV2
+// (we use plain Markdown mode to keep it simpler)
 function escMd(text: string): string {
   return text.replace(/[_*[\]()~`>#+\-=|{}.!]/g, "\\$&");
 }
+void escMd; // unused for now — keeping Markdown (not V2) mode
 
 export async function sendNotification(results: CourseResult[]): Promise<void> {
   if (results.length === 0) return;
@@ -42,8 +84,8 @@ export async function sendNotification(results: CourseResult[]): Promise<void> {
     chat_id: chatId,
     text,
     parse_mode: "Markdown",
-    disable_web_page_preview: true,
+    disable_web_page_preview: false,
   });
 
-  console.log(`[notifier] Telegram message sent to chat ${chatId}`);
+  console.log(`[notifier] Sent ${results.reduce((n, r) => n + r.teeTimes.length, 0)} alert(s) to Telegram chat ${chatId}`);
 }

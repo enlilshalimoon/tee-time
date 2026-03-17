@@ -1,33 +1,93 @@
 {
+  "_readme": [
+    "Copy this file to config.json and fill in your courses.",
+    "The bot will alert you when NEW tee times open up (not for times already available).",
+    "",
+    "How to find IDs for each platform:",
+    "  ForeUp:    Go to the course booking page → DevTools → Network → search for tee times",
+    "             → look for a request to foreupsoftware.com/index.php/api/booking/times",
+    "             → grab schedule_id and booking_class from the query string.",
+    "  TeeSnap:   Same DevTools approach → look for api.teesnap.net/v1/courses/{id}/teetimes",
+    "  Chronogolf: Find the club slug in the booking URL, e.g. chronogolf.com/club/{slug}",
+    "",
+    "Alternatively, just paste the booking URL into the Telegram bot and it will auto-detect!"
+  ],
   "courses": [
     {
-      "_comment": "--- ForeUp example ---",
-      "name": "Pebble Beach Golf Links",
+      "_comment": "--- Rustic Canyon Golf Course (Moorpark, CA) — ForeUp ---",
+      "name": "Rustic Canyon",
       "platform": "foreup",
-      "foreupScheduleId": "21",
-      "foreupBookingClass": "1308",
+      "foreupScheduleId": "21903",
+      "foreupBookingClass": "9285",
+      "bookingUrl": "https://foreupsoftware.com/index.php/booking/21903/9285#teetimes",
       "earliestTime": "07:00",
       "latestTime": "11:00",
       "minPlayers": 2,
       "daysOfWeek": [6, 0]
     },
     {
-      "_comment": "--- TeeSnap example ---",
-      "name": "Augusta National",
-      "platform": "teesnap",
-      "tesnapCourseId": "12345",
-      "earliestTime": "08:00",
-      "latestTime": "12:00"
+      "_comment": "--- Knollwood Country Club (Granada Hills, CA) — LA City — ForeUp ---",
+      "name": "Knollwood",
+      "platform": "foreup",
+      "foreupScheduleId": "12548",
+      "foreupBookingClass": "6063",
+      "bookingUrl": "https://foreupsoftware.com/index.php/booking/12548/6063#teetimes",
+      "earliestTime": "07:00",
+      "latestTime": "11:00",
+      "daysOfWeek": [6, 0]
     },
     {
-      "_comment": "--- EZLinks / GolfNow example ---",
-      "name": "Torrey Pines South",
-      "platform": "ezlinks",
-      "ezlinksFacilityId": "67890",
-      "ezlinksBookingUrl": "https://www.ezlinksgolf.com/index.html#/search?fc=67890",
-      "earliestTime": "06:00",
-      "latestTime": "10:00",
-      "daysOfWeek": [5, 6, 0]
+      "_comment": "--- Rancho Park Golf Course (West LA) — LA City — ForeUp ---",
+      "name": "Rancho Park",
+      "platform": "foreup",
+      "foreupScheduleId": "12545",
+      "foreupBookingClass": "6061",
+      "bookingUrl": "https://foreupsoftware.com/index.php/booking/12545/6061#teetimes",
+      "earliestTime": "07:00",
+      "latestTime": "11:00",
+      "daysOfWeek": [6, 0]
+    },
+    {
+      "_comment": "--- Wilson/Harding at Griffith Park (Los Feliz, CA) — LA City — ForeUp ---",
+      "name": "Wilson/Harding (Griffith Park)",
+      "platform": "foreup",
+      "foreupScheduleId": "12546",
+      "foreupBookingClass": "6062",
+      "bookingUrl": "https://foreupsoftware.com/index.php/booking/12546/6062#teetimes",
+      "earliestTime": "07:00",
+      "latestTime": "11:00",
+      "daysOfWeek": [6, 0]
+    },
+    {
+      "_comment": "--- Brookside Golf Course (Pasadena, CA) — ForeUp ---",
+      "name": "Brookside",
+      "platform": "foreup",
+      "foreupScheduleId": "21904",
+      "foreupBookingClass": "9286",
+      "bookingUrl": "https://foreupsoftware.com/index.php/booking/21904/9286#teetimes",
+      "earliestTime": "07:00",
+      "latestTime": "11:00",
+      "daysOfWeek": [6, 0]
+    },
+    {
+      "_comment": "--- Robinson Ranch Golf Course (Santa Clarita, CA) — Chronogolf ---",
+      "name": "Robinson Ranch",
+      "platform": "chronogolf",
+      "chronogolfClubId": "robinson-ranch",
+      "bookingUrl": "https://www.chronogolf.com/club/robinson-ranch/widget#/teetimes",
+      "earliestTime": "07:00",
+      "latestTime": "11:00",
+      "daysOfWeek": [6, 0]
+    },
+    {
+      "_comment": "--- TeeSnap example (replace courseId with the real one) ---",
+      "name": "My TeeSnap Course",
+      "platform": "teesnap",
+      "tesnapCourseId": "12345",
+      "bookingUrl": "https://mycourse.teesnap.net/",
+      "earliestTime": "07:00",
+      "latestTime": "11:00",
+      "daysOfWeek": [6, 0]
     }
   ]
 }

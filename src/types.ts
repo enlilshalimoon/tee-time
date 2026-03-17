@@ -1,43 +1,48 @@
-export type Platform = "foreup" | "teesnap" | "ezlinks";
+export type Platform = "foreup" | "teesnap" | "chronogolf";
 
 export interface CourseConfig {
   name: string;
   platform: Platform;
 
-  // ForeUp: find in the booking URL, e.g. schedule_id=21&booking_class=1308
+  // ForeUp: find in the booking URL
+  // e.g. foreupsoftware.com/index.php/booking/21903/9285
+  //   scheduleId = 21903, bookingClass = 9285
   foreupScheduleId?: string;
   foreupBookingClass?: string;
-  foreupFacilityId?: string; // used in some ForeUp URLs
 
-  // TeeSnap: find the courseId in the TeeSnap widget URL
+  // TeeSnap: the courseId in the TeeSnap widget URL
   tesnapCourseId?: string;
 
-  // EZLinks: the facility ID shown in the booking URL
-  ezlinksFacilityId?: string;
-  ezlinksBookingUrl?: string; // full base URL for the EZLinks booking portal
+  // Chronogolf / Lightspeed Golf: the club slug or numeric ID
+  // Find it in the booking URL, e.g. chronogolf.com/club/rustic-canyon/...
+  chronogolfClubId?: string;
 
   // Desired tee time window (24-hour format)
   earliestTime?: string; // e.g. "07:00"
   latestTime?: string;   // e.g. "11:00"
 
-  // Minimum number of available players slots required
+  // Minimum available player slots
   minPlayers?: number;
 
-  // Specific days of week to monitor (0=Sun, 1=Mon, ..., 6=Sat)
-  // If omitted, every day is monitored
+  // Days of week to monitor (0=Sun, 1=Mon, …, 6=Sat)
+  // Omit to monitor every day
   daysOfWeek?: number[];
+
+  // Direct link to the course's booking page (shown in alerts)
+  bookingUrl?: string;
 }
 
 export interface TeeTime {
-  time: string;        // ISO-8601 or HH:MM
+  time: string;        // HH:MM
   players: number;     // available spots
   holes: number;
   price?: number;
-  bookingUrl?: string;
+  bookingUrl?: string; // deep link to book this specific slot
 }
 
 export interface CourseResult {
   course: CourseConfig;
   date: string;        // YYYY-MM-DD
   teeTimes: TeeTime[];
+  isNew?: boolean;     // true when the slot just appeared
 }
