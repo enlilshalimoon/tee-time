@@ -70,6 +70,7 @@ type Step =
   | { name: "awaiting_time"; entries: ParsedEntry[] }
   | { name: "awaiting_days"; entries: ParsedEntry[]; earliest?: string; latest?: string }
   | { name: "awaiting_edit_field"; courseIdx: number }
+  | { name: "awaiting_edit_name"; courseIdx: number }
   | { name: "awaiting_edit_time"; courseIdx: number }
   | { name: "awaiting_edit_days"; courseIdx: number; earliest?: string; latest?: string };
 
@@ -284,6 +285,7 @@ async function handleEdit(chatId: string, args: string): Promise<void> {
     `Editing *${c.name}*\n` +
     `Current: ${time} · ${days}\n\n` +
     `What do you want to change?\n` +
+    `• \`name\` — rename the course\n` +
     `• \`time\` — change the time window\n` +
     `• \`days\` — change the days\n` +
     `• \`both\` — change time and days`
@@ -297,15 +299,39 @@ async function handleAwaitingEditField(
   session: Extract<Step, { name: "awaiting_edit_field" }>
 ): Promise<void> {
   const s = text.trim().toLowerCase();
-  if (s === "time" || s === "both") {
+  if (s === "name") {
+    const courses = getAllCourses();
+    const current = courses[session.courseIdx];
+    await sendMessage(chatId, `New name for *${current?.name ?? "this course"}*?`);
+    setSession(chatId, { name: "awaiting_edit_name", courseIdx: session.courseIdx });
+  } else if (s === "time" || s === "both") {
     await sendMessage(chatId, `New *time window*? (e.g. \`5am-3pm\`, \`07:00-15:00\`, or \`any\`)`);
     setSession(chatId, { name: "awaiting_edit_time", courseIdx: session.courseIdx });
   } else if (s === "days") {
     await sendMessage(chatId, `New *days*? (\`weekends\`, \`weekdays\`, \`fri sat sun\`, or \`all\`)`);
     setSession(chatId, { name: "awaiting_edit_days", courseIdx: session.courseIdx });
   } else {
-    await sendMessage(chatId, `Reply with \`time\`, \`days\`, or \`both\`.`);
+    await sendMessage(chatId, `Reply with \`name\`, \`time\`, \`days\`, or \`both\`.`);
   }
+}
+
+async function handleAwaitingEditName(
+  chatId: string,
+  text: string,
+  session: Extract<Step, { name: "awaiting_edit_name" }>
+): Promise<void> {
+  const newName = text.trim();
+  if (newName.length < 2) {
+    await sendMessage(chatId, "Enter a name (at least 2 characters).");
+    return;
+  }
+  const updated = updateCourseByIndex(session.courseIdx, { name: newName });
+  setSession(chatId, { name: "idle" });
+  if (!updated) {
+    await sendMessage(chatId, "Couldn't rename — course not found. Use /list.");
+    return;
+  }
+  await sendMessage(chatId, `✅ Renamed to *${updated.name}*.`);
 }
 
 async function handleAwaitingEditTime(
@@ -546,6 +572,7 @@ async function handleMessage(chatId: string, text: string): Promise<void> {
   if (session.name === "awaiting_time") return handleAwaitingTime(chatId, t, session);
   if (session.name === "awaiting_days") return handleAwaitingDays(chatId, t, session);
   if (session.name === "awaiting_edit_field") return handleAwaitingEditField(chatId, t, session);
+  if (session.name === "awaiting_edit_name") return handleAwaitingEditName(chatId, t, session);
   if (session.name === "awaiting_edit_time") return handleAwaitingEditTime(chatId, t, session);
   if (session.name === "awaiting_edit_days") return handleAwaitingEditDays(chatId, t, session);
 

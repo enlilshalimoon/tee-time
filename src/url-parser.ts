@@ -63,6 +63,47 @@ function parseChronogolf(url: URL): Partial<CourseConfig> | null {
 }
 
 // ---------------------------------------------------------------------------
+// Auto-detect booking platform from a course's own website HTML
+// ---------------------------------------------------------------------------
+
+async function detectPlatformFromPage(pageUrl: string): Promise<Partial<CourseConfig> | null> {
+  try {
+    const resp = await axios.get<string>(pageUrl, {
+      timeout: 10_000,
+      headers: { "User-Agent": "Mozilla/5.0" },
+      maxContentLength: 100_000,
+    });
+    const html: string = resp.data;
+
+    // Chronogolf widget embed: looks for the club slug in script/iframe src
+    const chronoMatch = html.match(/chronogolf\.com\/club\/([a-zA-Z0-9_-]+)/);
+    if (chronoMatch) {
+      return { platform: "chronogolf", chronogolfClubId: chronoMatch[1], bookingUrl: pageUrl };
+    }
+
+    // Lightspeed Golf embed
+    const lsMatch = html.match(/golf\.lightspeedhq\.com\/(?:clubs|api\/v2\/clubs)\/([a-zA-Z0-9_-]+)/);
+    if (lsMatch) {
+      return { platform: "chronogolf", chronogolfClubId: lsMatch[1], bookingUrl: pageUrl };
+    }
+
+    // ForeUp embed
+    const foreupMatch = html.match(/foreupsoftware\.com\/index\.php\/booking\/(\d+)(?:\/(\d+))?/);
+    if (foreupMatch) {
+      return {
+        platform: "foreup",
+        foreupScheduleId: foreupMatch[1],
+        ...(foreupMatch[2] ? { foreupBookingClass: foreupMatch[2] } : {}),
+        bookingUrl: pageUrl,
+      };
+    }
+  } catch {
+    // ignore — network error or timeout
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // Public entry point
 // ---------------------------------------------------------------------------
 
@@ -92,11 +133,15 @@ export async function parseBookingUrl(raw: string): Promise<ParsedCourse | null>
     partial = parseChronogolf(url);
   }
 
-  // Fallback: any URL we don't specifically recognise → "web" platform
-  // The universal scraper will load it in a headless browser and
-  // intercept API calls / scrape the DOM.
+  // Fallback: any URL we don't specifically recognise → check if the page
+  // embeds a known booking platform, then fall back to web scraping.
   if (!partial || !partial.platform) {
-    partial = { platform: "web", bookingUrl: url.toString() };
+    const detected = await detectPlatformFromPage(url.toString());
+    if (detected) {
+      partial = detected;
+    } else {
+      partial = { platform: "web", bookingUrl: url.toString() };
+    }
   }
 
   const suggestedName = await tryFetchCourseName(partial, url);
@@ -158,6 +203,13 @@ async function tryFetchCourseName(
   return ""; // empty = bot should prompt the user for a name
 }
 
+// Titles that are too generic to use as a course name
+const GENERIC_TITLES = new Set([
+  "tee times", "book tee times", "golf tee times", "tee time booking",
+  "online booking", "book now", "reserve tee times", "golf booking",
+  "tee times search", "search tee times", "home",
+]);
+
 /** Fetch a URL's <title> tag and clean it up for use as a course name. */
 async function fetchTitleFromPage(pageUrl: string): Promise<string> {
   try {
@@ -172,9 +224,12 @@ async function fetchTitleFromPage(pageUrl: string): Promise<string> {
       let name = titleMatch[1].trim();
       // Strip common suffixes
       name = name
-        .replace(/\s*[-–|:]\s*(ForeUp|Book Tee Times?|Online Booking|GolfNow|EZLinks|Play18|Reserve|Search).*/i, "")
+        .replace(/\s*[-–|:]\s*(ForeUp|Book Tee Times?|Online Booking|GolfNow|EZLinks|Play18|Reserve|Search|Tee Times?).*/i, "")
         .trim();
-      if (name && name.length > 2 && name.length < 80) return name;
+      // Reject generic titles
+      if (name && name.length > 2 && name.length < 80 && !GENERIC_TITLES.has(name.toLowerCase())) {
+        return name;
+      }
     }
   } catch {
     // ignore

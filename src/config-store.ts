@@ -46,7 +46,7 @@ export function removeCourse(name: string): boolean {
 
 export function updateCourseByIndex(
   idx: number,
-  updates: Partial<Pick<CourseConfig, "earliestTime" | "latestTime" | "daysOfWeek">>
+  updates: Partial<Pick<CourseConfig, "name" | "earliestTime" | "latestTime" | "daysOfWeek">>
 ): CourseConfig | null {
   const data = readConfig();
   const real = data.courses.filter((c) => !("_hint" in c));
