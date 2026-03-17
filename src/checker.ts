@@ -91,12 +91,24 @@ async function checkCourseForDate(
 // ---------------------------------------------------------------------------
 
 export async function checkAllCourses(courses: CourseConfig[]): Promise<CourseResult[]> {
+  const { results } = await checkAllCoursesDetailed(courses);
+  return results;
+}
+
+export async function checkAllCoursesDetailed(
+  courses: CourseConfig[]
+): Promise<{ results: CourseResult[]; errors: string[] }> {
   const dates = getDatesToCheck();
   const results: CourseResult[] = [];
+  const errors: string[] = [];
 
   for (const course of courses) {
+    let checkedAnyDate = false;
+    let courseErrorMsg = "";
+
     for (const date of dates) {
       if (!isDayWanted(date, course.daysOfWeek)) continue;
+      checkedAnyDate = true;
 
       try {
         const teeTimes = await checkCourseForDate(course, date);
@@ -109,9 +121,17 @@ export async function checkAllCourses(courses: CourseConfig[]): Promise<CourseRe
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error(`[checker] ${course.name} on ${date}: ERROR — ${msg}`);
+        // Only record the first error per course to avoid spamming
+        if (!courseErrorMsg) courseErrorMsg = msg;
       }
+    }
+
+    if (!checkedAnyDate) {
+      errors.push(`${course.name}: no dates to check (days filter: ${course.daysOfWeek?.join(",")})`);
+    } else if (courseErrorMsg) {
+      errors.push(`${course.name}: ${courseErrorMsg}`);
     }
   }
 
-  return results;
+  return { results, errors };
 }

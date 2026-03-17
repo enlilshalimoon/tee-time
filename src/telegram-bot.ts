@@ -16,7 +16,7 @@ import axios from "axios";
 import { CourseConfig, CourseResult } from "./types";
 import { parseBookingUrl, ParsedCourse } from "./url-parser";
 import { addCourse, getAllCourses, removeCourseByIndex, updateCourseByIndex } from "./config-store";
-import { checkAllCourses } from "./checker";
+import { checkAllCoursesDetailed } from "./checker";
 import { sendNotification } from "./notifier";
 
 // ---------------------------------------------------------------------------
@@ -209,11 +209,23 @@ async function handleCheck(chatId: string): Promise<void> {
   }
   await sendMessage(chatId, `Checking ${courses.length} course(s)…`);
   try {
-    const allResults = await checkAllCourses(courses);
-    if (allResults.length === 0) {
-      await sendMessage(chatId, "No tee times found right now across all courses.");
+    const { results, errors } = await checkAllCoursesDetailed(courses);
+
+    if (results.length === 0 && errors.length === 0) {
+      await sendMessage(chatId, "No tee times available right now.");
     } else {
-      await sendNotification(allResults);
+      if (results.length > 0) {
+        await sendNotification(results);
+      } else {
+        await sendMessage(chatId, "No tee times found in your time window.");
+      }
+      if (errors.length > 0) {
+        await sendMessage(
+          chatId,
+          `⚠️ *Errors on ${errors.length} course(s):*\n` +
+          errors.map((e) => `• ${e}`).join("\n")
+        );
+      }
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
