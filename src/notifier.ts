@@ -1,75 +1,49 @@
-import nodemailer from "nodemailer";
+import axios from "axios";
 import { CourseResult, TeeTime } from "./types";
 
-function formatTeeTime(tt: TeeTime): string {
-  const parts = [`${tt.time} — ${tt.players} player spot(s), ${tt.holes} holes`];
-  if (tt.price !== undefined) parts.push(`$${tt.price.toFixed(2)}`);
-  if (tt.bookingUrl) parts.push(`<a href="${tt.bookingUrl}">Book now</a>`);
-  return parts.join(" | ");
-}
-
-function buildEmailBody(results: CourseResult[]): { text: string; html: string } {
-  const lines: string[] = [];
-  const htmlLines: string[] = [
-    "<html><body>",
-    "<h2 style='color:#2d6a2d'>⛳ Golf Tee Times Available</h2>",
-  ];
+function buildMessage(results: CourseResult[]): string {
+  const lines: string[] = ["⛳ *Tee Times Available!*\n"];
 
   for (const result of results) {
-    const header = `${result.course.name} — ${result.date} (${result.teeTimes.length} slot(s))`;
-    lines.push(`\n${header}`);
-    lines.push("=".repeat(header.length));
-    htmlLines.push(`<h3>${result.course.name} — ${result.date}</h3><ul>`);
+    lines.push(`*${escMd(result.course.name)}* — ${result.date}`);
 
     for (const tt of result.teeTimes) {
-      const plain = `  ${tt.time}  |  ${tt.players} spots  |  ${tt.holes}h` +
-        (tt.price !== undefined ? `  |  $${tt.price.toFixed(2)}` : "") +
-        (tt.bookingUrl ? `  |  ${tt.bookingUrl}` : "");
-      lines.push(plain);
-
-      const html = `<li>${formatTeeTime(tt)}</li>`;
-      htmlLines.push(html);
+      let line = `  🕐 ${tt.time}  ·  ${tt.players} spot(s)  ·  ${tt.holes}h`;
+      if (tt.price !== undefined) line += `  ·  $${tt.price.toFixed(2)}`;
+      if (tt.bookingUrl) line += `\n  [Book now](${tt.bookingUrl})`;
+      lines.push(line);
     }
 
-    htmlLines.push("</ul>");
+    lines.push("");
   }
 
-  htmlLines.push("<p style='color:#888;font-size:12px'>Sent by tee-time-bot</p></body></html>");
-
-  return {
-    text: lines.join("\n"),
-    html: htmlLines.join("\n"),
-  };
+  return lines.join("\n");
 }
 
-function buildSubject(results: CourseResult[]): string {
-  const totalSlots = results.reduce((n, r) => n + r.teeTimes.length, 0);
-  const courseNames = results.map((r) => r.course.name).join(", ");
-  return `[Tee Time Alert] ${totalSlots} slot(s) at ${courseNames}`;
+// Escape special chars for Telegram MarkdownV2
+function escMd(text: string): string {
+  return text.replace(/[_*[\]()~`>#+\-=|{}.!]/g, "\\$&");
 }
 
 export async function sendNotification(results: CourseResult[]): Promise<void> {
   if (results.length === 0) return;
 
-  const transporter = nodemailer.createTransport({
-    host: process.env.EMAIL_HOST ?? "smtp.gmail.com",
-    port: parseInt(process.env.EMAIL_PORT ?? "587", 10),
-    secure: process.env.EMAIL_SECURE === "true",
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS,
-    },
-  });
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
 
-  const { text, html } = buildEmailBody(results);
+  if (!token || !chatId) {
+    throw new Error("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be set in .env");
+  }
 
-  await transporter.sendMail({
-    from: process.env.EMAIL_FROM ?? process.env.EMAIL_USER,
-    to: process.env.EMAIL_TO,
-    subject: buildSubject(results),
+  const text = buildMessage(results);
+  const url = `https://api.telegram.org/bot${token}/sendMessage`;
+
+  await axios.post(url, {
+    chat_id: chatId,
     text,
-    html,
+    parse_mode: "Markdown",
+    disable_web_page_preview: true,
   });
 
-  console.log(`[notifier] Email sent to ${process.env.EMAIL_TO}`);
+  console.log(`[notifier] Telegram message sent to chat ${chatId}`);
 }
