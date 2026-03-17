@@ -24,6 +24,9 @@ export interface CourseConfig {
   // Minimum available player slots
   minPlayers?: number;
 
+  // Minimum holes (set to 18 to exclude par-3 and 9-hole options)
+  minHoles?: number;
+
   // Days of week to monitor (0=Sun, 1=Mon, …, 6=Sat)
   // Omit to monitor every day
   daysOfWeek?: number[];

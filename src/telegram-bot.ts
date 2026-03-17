@@ -2,21 +2,19 @@
  * Telegram bot — silent in groups unless spoken to via slash commands.
  *
  * Commands:
- *   /add                  → guided flow to add a course monitor
- *   /list                 → show monitored courses
- *   /remove <number>      → stop monitoring a course
- *   /check                → run a manual tee-time check right now
- *   /test                 → send a fake alert to preview notifications
- *   /help                 → show commands
+ *   /add        → add one or many courses (paste multiple URLs at once)
+ *   /list       → show monitored courses
+ *   /remove N   → stop monitoring a course
+ *   /check      → run a manual check right now
+ *   /test       → send a fake alert to preview notifications
+ *   /help       → show commands
  *
- * The bot NEVER talks unprompted — it only speaks when:
- *   1. Someone uses a slash command
- *   2. A newly opened tee time is found (scheduled alert)
+ * The bot NEVER talks unprompted — only on slash commands or tee time alerts.
  */
 
 import axios from "axios";
 import { CourseConfig, CourseResult } from "./types";
-import { parseBookingUrl } from "./url-parser";
+import { parseBookingUrl, ParsedCourse } from "./url-parser";
 import { addCourse, getAllCourses, removeCourseByIndex } from "./config-store";
 import { checkAllCourses } from "./checker";
 import { filterNewlyOpened } from "./change-detector";
@@ -28,7 +26,7 @@ import { sendNotification } from "./notifier";
 
 let BOT_TOKEN = "";
 let CHAT_ID = "";
-let ALLOWED_CHATS: Set<string> = new Set(); // empty = allow all
+let ALLOWED_CHATS: Set<string> = new Set();
 const TG = () => `https://api.telegram.org/bot${BOT_TOKEN}`;
 
 async function sendMessage(chatId: string, text: string): Promise<void> {
@@ -61,12 +59,17 @@ interface TelegramUpdate {
 // Conversation state machine (only active after /add)
 // ---------------------------------------------------------------------------
 
+interface ParsedEntry {
+  parsed: ParsedCourse;
+  name: string; // resolved name (may be empty if needs asking)
+}
+
 type Step =
   | { name: "idle" }
-  | { name: "awaiting_url" }
-  | { name: "awaiting_name"; draft: Partial<CourseConfig> }
-  | { name: "awaiting_time"; draft: Partial<CourseConfig>; suggestedName: string }
-  | { name: "awaiting_days"; draft: Partial<CourseConfig>; suggestedName: string };
+  | { name: "awaiting_urls" }
+  | { name: "awaiting_name"; entries: ParsedEntry[]; currentIdx: number }
+  | { name: "awaiting_time"; entries: ParsedEntry[] }
+  | { name: "awaiting_days"; entries: ParsedEntry[]; earliest?: string; latest?: string };
 
 const sessions = new Map<string, Step>();
 function getSession(chatId: string): Step {
@@ -107,12 +110,8 @@ function parseDays(input: string): number[] | null {
   if (s === "all" || s === "any" || s === "every day") return [];
 
   const nameMap: Record<string, number> = {
-    sun: 0, sunday: 0,
-    mon: 1, monday: 1,
-    tue: 2, tuesday: 2,
-    wed: 3, wednesday: 3,
-    thu: 4, thursday: 4,
-    fri: 5, friday: 5,
+    sun: 0, sunday: 0, mon: 1, monday: 1, tue: 2, tuesday: 2,
+    wed: 3, wednesday: 3, thu: 4, thursday: 4, fri: 5, friday: 5,
     sat: 6, saturday: 6,
   };
 
@@ -122,13 +121,9 @@ function parseDays(input: string): number[] | null {
   const parts = s.split(/[\s,]+/);
   const days: number[] = [];
   for (const part of parts) {
-    if (/^\d$/.test(part)) {
-      days.push(parseInt(part, 10));
-    } else if (nameMap[part] !== undefined) {
-      days.push(nameMap[part]);
-    } else {
-      return null;
-    }
+    if (/^\d$/.test(part)) days.push(parseInt(part, 10));
+    else if (nameMap[part] !== undefined) days.push(nameMap[part]);
+    else return null;
   }
   return days.length > 0 ? days : null;
 }
@@ -148,30 +143,29 @@ async function handleHelp(chatId: string): Promise<void> {
     chatId,
     `*Tee Time Bot* ⛳\n\n` +
     `*Commands:*\n` +
-    `/add — add a course to monitor\n` +
+    `/add — add courses (paste multiple URLs at once)\n` +
     `/list — show monitored courses\n` +
     `/remove <number> — stop monitoring a course\n` +
     `/check — run a manual check right now\n` +
     `/test — send a fake alert to preview notifications\n` +
     `/help — show this message\n\n` +
-    `Works with any booking site — ForeUp, TeeSnap, Chronogolf, EZLinks, Play18, GolfNow, and more.\n\n` +
-    `I only talk when a new tee time opens up or when you use a command.`
+    `Works with any booking site. I only talk when a new tee time opens up or when you use a command.`
   );
 }
 
 async function handleAdd(chatId: string): Promise<void> {
   await sendMessage(
     chatId,
-    `Paste the *booking page URL* for the course you want to monitor.\n\n` +
-    `Go to the course's website, find their tee time booking page, and paste that URL here.`
+    `Paste your booking page URL(s) — one per line, or comma separated.\n\n` +
+    `You can add as many courses at once as you want.`
   );
-  setSession(chatId, { name: "awaiting_url" });
+  setSession(chatId, { name: "awaiting_urls" });
 }
 
 async function handleList(chatId: string): Promise<void> {
   const courses = getAllCourses();
   if (courses.length === 0) {
-    await sendMessage(chatId, "No courses monitored yet. Use /add to add one.");
+    await sendMessage(chatId, "No courses monitored yet. Use /add.");
     return;
   }
 
@@ -179,13 +173,12 @@ async function handleList(chatId: string): Promise<void> {
     const time =
       c.earliestTime && c.latestTime
         ? `${c.earliestTime}–${c.latestTime}`
-        : c.earliestTime
-        ? `after ${c.earliestTime}`
-        : c.latestTime
-        ? `before ${c.latestTime}`
+        : c.earliestTime ? `after ${c.earliestTime}`
+        : c.latestTime ? `before ${c.latestTime}`
         : "any time";
     const days = c.daysOfWeek ? formatDays(c.daysOfWeek) : "every day";
-    return `${i + 1}. *${c.name}*\n   ${c.platform} · ${time} · ${days}`;
+    const link = c.bookingUrl ? `\n   ${c.bookingUrl}` : "";
+    return `${i + 1}. *${c.name}*\n   ${c.platform} · ${time} · ${days}${link}`;
   });
 
   await sendMessage(chatId, `*Monitored courses:*\n\n${lines.join("\n\n")}`);
@@ -194,14 +187,14 @@ async function handleList(chatId: string): Promise<void> {
 async function handleRemove(chatId: string, args: string): Promise<void> {
   const idx = parseInt(args.trim(), 10) - 1;
   if (isNaN(idx)) {
-    await sendMessage(chatId, "Usage: `/remove 1` — use /list to see course numbers.");
+    await sendMessage(chatId, "Usage: `/remove 1` — use /list to see numbers.");
     return;
   }
   const removed = removeCourseByIndex(idx);
   if (!removed) {
-    await sendMessage(chatId, `No course at position ${idx + 1}. Use /list to check.`);
+    await sendMessage(chatId, `No course at #${idx + 1}. Use /list.`);
   } else {
-    await sendMessage(chatId, `Removed *${removed.name}* from monitoring.`);
+    await sendMessage(chatId, `Removed *${removed.name}*.`);
   }
 }
 
@@ -229,7 +222,7 @@ async function handleCheck(chatId: string): Promise<void> {
 async function handleTest(chatId: string): Promise<void> {
   const courses = getAllCourses();
   if (courses.length === 0) {
-    await sendMessage(chatId, "No courses configured. Use /add first, then /test.");
+    await sendMessage(chatId, "No courses configured. Use /add first.");
     return;
   }
 
@@ -254,39 +247,62 @@ async function handleTest(chatId: string): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// /add flow — step handlers
+// /add flow
 // ---------------------------------------------------------------------------
 
-async function handleAwaitingUrl(chatId: string, text: string): Promise<void> {
-  const urlMatch = text.match(/https?:\/\/\S+/);
-  if (!urlMatch) {
-    await sendMessage(chatId, "That doesn't look like a URL. Paste the full booking page URL (starting with https://).");
+/** Extract all URLs from a message (comma, newline, or space separated). */
+function extractUrls(text: string): string[] {
+  const matches = text.match(/https?:\/\/[^\s,<>"]+/g);
+  return matches ?? [];
+}
+
+async function handleAwaitingUrls(chatId: string, text: string): Promise<void> {
+  const urls = extractUrls(text);
+  if (urls.length === 0) {
+    await sendMessage(chatId, "No URLs found. Paste booking page URLs starting with https://");
     return;
   }
 
-  await sendMessage(chatId, "🔍 Parsing…");
+  await sendMessage(chatId, `Parsing ${urls.length} URL(s)…`);
 
-  const parsed = await parseBookingUrl(urlMatch[0]);
-  if (!parsed) {
-    await sendMessage(chatId, "Couldn't parse that URL. Try pasting the full booking page URL.");
+  const entries: ParsedEntry[] = [];
+  const failed: string[] = [];
+
+  for (const url of urls) {
+    const parsed = await parseBookingUrl(url);
+    if (parsed) {
+      entries.push({ parsed, name: parsed.suggestedName });
+    } else {
+      failed.push(url);
+    }
+  }
+
+  if (failed.length > 0) {
+    await sendMessage(chatId, `Couldn't parse: ${failed.join("\n")}`);
+  }
+  if (entries.length === 0) {
+    await sendMessage(chatId, "No valid courses found. Try again with /add.");
     setSession(chatId, { name: "idle" });
     return;
   }
 
-  if (parsed.suggestedName) {
+  // Show what we found
+  const summary = entries
+    .map((e, i) => `${i + 1}. ${e.name || "❓ Unknown"} (${e.parsed.platform})`)
+    .join("\n");
+  await sendMessage(chatId, `Found:\n${summary}`);
+
+  // Check if any need names
+  const needsName = entries.findIndex((e) => !e.name);
+  if (needsName >= 0) {
     await sendMessage(
       chatId,
-      `Found *${parsed.suggestedName}*!\n\n` +
-      `What *time window*? (e.g. \`7am-11am\` or \`any\`)`
+      `What's the name of course #${needsName + 1}? (${entries[needsName].parsed.partial.bookingUrl ?? "unknown URL"})`
     );
-    setSession(chatId, {
-      name: "awaiting_time",
-      draft: { ...parsed.partial, name: parsed.suggestedName },
-      suggestedName: parsed.suggestedName,
-    });
+    setSession(chatId, { name: "awaiting_name", entries, currentIdx: needsName });
   } else {
-    await sendMessage(chatId, `What's the *name* of this course?`);
-    setSession(chatId, { name: "awaiting_name", draft: parsed.partial });
+    await sendMessage(chatId, `What *time window*? (e.g. \`5am-3pm\` or \`any\`)`);
+    setSession(chatId, { name: "awaiting_time", entries });
   }
 }
 
@@ -297,16 +313,24 @@ async function handleAwaitingName(
 ): Promise<void> {
   const courseName = text.trim();
   if (courseName.length < 2) {
-    await sendMessage(chatId, "Enter a course name (at least 2 characters).");
+    await sendMessage(chatId, "Enter a name (at least 2 characters).");
     return;
   }
 
-  await sendMessage(chatId, `What *time window*? (e.g. \`7am-11am\` or \`any\`)`);
-  setSession(chatId, {
-    name: "awaiting_time",
-    draft: { ...session.draft, name: courseName },
-    suggestedName: courseName,
-  });
+  session.entries[session.currentIdx].name = courseName;
+
+  // Find next unnamed
+  const nextIdx = session.entries.findIndex((e, i) => i > session.currentIdx && !e.name);
+  if (nextIdx >= 0) {
+    await sendMessage(
+      chatId,
+      `What's the name of course #${nextIdx + 1}? (${session.entries[nextIdx].parsed.partial.bookingUrl ?? "unknown URL"})`
+    );
+    setSession(chatId, { ...session, currentIdx: nextIdx });
+  } else {
+    await sendMessage(chatId, `What *time window*? (e.g. \`5am-3pm\` or \`any\`)`);
+    setSession(chatId, { name: "awaiting_time", entries: session.entries });
+  }
 }
 
 async function handleAwaitingTime(
@@ -316,13 +340,17 @@ async function handleAwaitingTime(
 ): Promise<void> {
   const window = parseTimeWindow(text);
   if (window === null) {
-    await sendMessage(chatId, `Try \`7am-11am\`, \`07:00-11:00\`, or \`any\`.`);
+    await sendMessage(chatId, `Try \`5am-3pm\`, \`07:00-15:00\`, or \`any\`.`);
     return;
   }
 
-  const draft: Partial<CourseConfig> = { ...session.draft, ...window };
   await sendMessage(chatId, `Which *days*? (\`weekends\`, \`weekdays\`, \`fri sat sun\`, or \`all\`)`);
-  setSession(chatId, { name: "awaiting_days", draft, suggestedName: session.suggestedName });
+  setSession(chatId, {
+    name: "awaiting_days",
+    entries: session.entries,
+    earliest: window.earliest,
+    latest: window.latest,
+  });
 }
 
 async function handleAwaitingDays(
@@ -336,31 +364,39 @@ async function handleAwaitingDays(
     return;
   }
 
-  const course: CourseConfig = {
-    name: session.draft.name ?? session.suggestedName,
-    platform: session.draft.platform!,
-    ...(session.draft.foreupScheduleId ? { foreupScheduleId: session.draft.foreupScheduleId } : {}),
-    ...(session.draft.foreupBookingClass ? { foreupBookingClass: session.draft.foreupBookingClass } : {}),
-    ...(session.draft.tesnapCourseId ? { tesnapCourseId: session.draft.tesnapCourseId } : {}),
-    ...(session.draft.chronogolfClubId ? { chronogolfClubId: session.draft.chronogolfClubId } : {}),
-    ...(session.draft.earliestTime ? { earliestTime: session.draft.earliestTime } : {}),
-    ...(session.draft.latestTime ? { latestTime: session.draft.latestTime } : {}),
-    ...(session.draft.bookingUrl ? { bookingUrl: session.draft.bookingUrl } : {}),
-    ...(days.length > 0 ? { daysOfWeek: days } : {}),
-  };
+  // Save all courses
+  const names: string[] = [];
+  for (const entry of session.entries) {
+    const p = entry.parsed.partial;
+    const course: CourseConfig = {
+      name: entry.name,
+      platform: p.platform!,
+      ...(p.foreupScheduleId ? { foreupScheduleId: p.foreupScheduleId } : {}),
+      ...(p.foreupBookingClass ? { foreupBookingClass: p.foreupBookingClass } : {}),
+      ...(p.tesnapCourseId ? { tesnapCourseId: p.tesnapCourseId } : {}),
+      ...(p.chronogolfClubId ? { chronogolfClubId: p.chronogolfClubId } : {}),
+      ...(p.bookingUrl ? { bookingUrl: p.bookingUrl } : {}),
+      ...(session.earliest ? { earliestTime: session.earliest } : {}),
+      ...(session.latest ? { latestTime: session.latest } : {}),
+      ...(days.length > 0 ? { daysOfWeek: days } : {}),
+    };
+    addCourse(course);
+    names.push(course.name);
+  }
 
-  addCourse(course);
   setSession(chatId, { name: "idle" });
 
   const time =
-    course.earliestTime && course.latestTime
-      ? `${course.earliestTime}–${course.latestTime}`
+    session.earliest && session.latest
+      ? `${session.earliest}–${session.latest}`
       : "any time";
   const daysLabel = formatDays(days);
 
   await sendMessage(
     chatId,
-    `✅ *${course.name}* added! Monitoring *${daysLabel}*, *${time}*.`
+    `✅ Added *${names.length}* course(s):\n` +
+    names.map((n) => `• *${n}*`).join("\n") +
+    `\n\nMonitoring *${daysLabel}*, *${time}*. Use /test to preview alerts.`
   );
 }
 
@@ -370,8 +406,6 @@ async function handleAwaitingDays(
 
 async function handleMessage(chatId: string, text: string): Promise<void> {
   const t = text.trim();
-
-  // Handle /commands — strip @botname suffix for group compatibility
   const cmd = t.split(/\s|@/)[0].toLowerCase();
 
   if (cmd === "/help" || cmd === "/start") return handleHelp(chatId);
@@ -386,15 +420,14 @@ async function handleMessage(chatId: string, text: string): Promise<void> {
     return;
   }
 
-  // If we're mid-flow from /add, handle the response
+  // Mid-flow responses
   const session = getSession(chatId);
-
-  if (session.name === "awaiting_url") return handleAwaitingUrl(chatId, t);
+  if (session.name === "awaiting_urls") return handleAwaitingUrls(chatId, t);
   if (session.name === "awaiting_name") return handleAwaitingName(chatId, t, session);
   if (session.name === "awaiting_time") return handleAwaitingTime(chatId, t, session);
   if (session.name === "awaiting_days") return handleAwaitingDays(chatId, t, session);
 
-  // Otherwise: stay silent. Don't respond to random chat messages.
+  // Silent — don't respond to random messages
 }
 
 // ---------------------------------------------------------------------------
@@ -430,7 +463,7 @@ export async function startTelegramBot(): Promise<void> {
         const chatId = String(msg.chat.id);
 
         if (ALLOWED_CHATS.size > 0 && !ALLOWED_CHATS.has(chatId)) {
-          continue; // silently ignore
+          continue;
         }
 
         await handleMessage(chatId, msg.text).catch((err) => {

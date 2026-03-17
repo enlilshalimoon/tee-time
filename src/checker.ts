@@ -81,6 +81,7 @@ async function checkCourseForDate(
   return teeTimes.filter((tt) => {
     if (!isTimeInWindow(tt.time, course.earliestTime, course.latestTime)) return false;
     if (course.minPlayers && tt.players < course.minPlayers) return false;
+    if (course.minHoles && tt.holes < course.minHoles) return false;
     return true;
   });
 }

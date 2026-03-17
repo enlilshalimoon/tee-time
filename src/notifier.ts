@@ -29,28 +29,43 @@ function friendlyTime(hhmm: string): string {
 }
 
 function buildMessage(results: CourseResult[]): string {
-  const lines: string[] = [];
+  // Group tee times by course+date so alerts are compact
+  const groups = new Map<string, { course: CourseResult["course"]; date: string; times: CourseResult["teeTimes"] }>();
 
   for (const result of results) {
-    const dateLine = friendlyDate(result.date);
-
-    for (const tt of result.teeTimes) {
-      const timeStr = friendlyTime(tt.time);
-      const spotsStr = tt.players === 1 ? "1 spot" : `${tt.players} spots`;
-      const priceStr = tt.price !== undefined ? ` · $${tt.price.toFixed(0)}` : "";
-
-      let line =
-        `⛳ *${result.course.name}* just opened for *${dateLine}* at *${timeStr}*` +
-        ` (${spotsStr}${priceStr})`;
-
-      // Prefer the deep booking link on the slot, fall back to course booking page
-      const bookLink = tt.bookingUrl ?? result.course.bookingUrl;
-      if (bookLink) {
-        line += `\n[Book now →](${bookLink})`;
-      }
-
-      lines.push(line);
+    const key = `${result.course.name}|${result.date}`;
+    const existing = groups.get(key);
+    if (existing) {
+      existing.times.push(...result.teeTimes);
+    } else {
+      groups.set(key, { course: result.course, date: result.date, times: [...result.teeTimes] });
     }
+  }
+
+  const lines: string[] = [];
+
+  for (const { course, date, times } of groups.values()) {
+    const dateLine = friendlyDate(date);
+    const bookLink = course.bookingUrl ?? "";
+
+    const timeList = times
+      .map((tt) => {
+        const t = friendlyTime(tt.time);
+        const spots = tt.players === 1 ? "1 spot" : `${tt.players} spots`;
+        const price = tt.price !== undefined ? ` · $${tt.price.toFixed(0)}` : "";
+        return `  ${t} — ${spots}${price}`;
+      })
+      .join("\n");
+
+    let block =
+      `⛳ *${course.name}* just opened for *${dateLine}*\n` +
+      timeList;
+
+    if (bookLink) {
+      block += `\n[Book here → ${bookLink}](${bookLink})`;
+    }
+
+    lines.push(block);
   }
 
   return lines.join("\n\n");

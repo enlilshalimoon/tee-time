@@ -1,14 +1,53 @@
 {
   "courses": [
     {
-      "_hint": "Replace this with your real course. See README for how to find IDs.",
-      "name": "My Course",
-      "platform": "foreup",
-      "foreupScheduleId": "REPLACE_ME",
-      "foreupBookingClass": "REPLACE_ME",
-      "earliestTime": "07:00",
-      "latestTime": "11:00",
+      "name": "Los Robles",
+      "platform": "web",
+      "bookingUrl": "https://losrobles.ezlinksgolf.com/index.html#/search",
+      "earliestTime": "05:00",
+      "latestTime": "15:00",
       "daysOfWeek": [6, 0]
+    },
+    {
+      "name": "Moorpark",
+      "platform": "web",
+      "bookingUrl": "https://moorpark.play18.com/teetimes/searchmatrix?teedate=20260321",
+      "earliestTime": "05:00",
+      "latestTime": "15:00",
+      "daysOfWeek": [6, 0]
+    },
+    {
+      "name": "Tierra Rejada",
+      "platform": "web",
+      "bookingUrl": "https://tierrarejadapubpp.ezlinksgolf.com/index.html#/search",
+      "earliestTime": "05:00",
+      "latestTime": "15:00",
+      "daysOfWeek": [6, 0]
+    },
+    {
+      "name": "Rustic Canyon",
+      "platform": "web",
+      "bookingUrl": "https://foreupsoftware.com/index.php/booking/21903/9285#teetimes",
+      "earliestTime": "05:00",
+      "latestTime": "15:00",
+      "daysOfWeek": [6, 0]
+    },
+    {
+      "name": "Los Verdes",
+      "platform": "web",
+      "bookingUrl": "https://los-verdes-golf-course-public.book.teeitup.com/teetimes",
+      "earliestTime": "05:00",
+      "latestTime": "15:00",
+      "daysOfWeek": [6, 0]
+    },
+    {
+      "name": "LA City Golf",
+      "platform": "web",
+      "bookingUrl": "https://cityoflapcp.ezlinksgolf.com/index.html#/search",
+      "earliestTime": "05:00",
+      "latestTime": "15:00",
+      "daysOfWeek": [6, 0],
+      "minHoles": 18
     }
   ]
 }
