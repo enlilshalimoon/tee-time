@@ -1,29 +1,9 @@
 import "dotenv/config";
 import cron from "node-cron";
-import path from "path";
-import fs from "fs";
-import { CourseConfig } from "./types";
+import { getAllCourses } from "./config-store";
 import { checkAllCourses } from "./checker";
 import { sendNotification } from "./notifier";
-
-// ---------------------------------------------------------------------------
-// Load course config
-// ---------------------------------------------------------------------------
-
-function loadCourses(): CourseConfig[] {
-  const configPath = path.resolve(process.cwd(), "config.json");
-  if (!fs.existsSync(configPath)) {
-    console.error("[bot] config.json not found. Copy config.example.json to config.json and fill in your courses.");
-    process.exit(1);
-  }
-  const raw = fs.readFileSync(configPath, "utf-8");
-  const data = JSON.parse(raw) as { courses: CourseConfig[] };
-  if (!Array.isArray(data.courses) || data.courses.length === 0) {
-    console.error("[bot] config.json must have a non-empty \"courses\" array.");
-    process.exit(1);
-  }
-  return data.courses;
-}
+import { startTelegramBot } from "./telegram-bot";
 
 // ---------------------------------------------------------------------------
 // Deduplication — don't re-alert for the same (course, date, time) combo
@@ -31,7 +11,9 @@ function loadCourses(): CourseConfig[] {
 
 const alerted = new Set<string>();
 
-function filterNewResults(results: ReturnType<typeof checkAllCourses> extends Promise<infer T> ? T : never) {
+function filterNewResults(
+  results: Awaited<ReturnType<typeof checkAllCourses>>
+) {
   return results
     .map((result) => ({
       ...result,
@@ -46,26 +28,30 @@ function filterNewResults(results: ReturnType<typeof checkAllCourses> extends Pr
 }
 
 // ---------------------------------------------------------------------------
-// Main run loop
+// Main check run
 // ---------------------------------------------------------------------------
 
 async function run(): Promise<void> {
-  const courses = loadCourses();
-  console.log(`[bot] Checking ${courses.length} course(s) …`);
+  const courses = getAllCourses();
+  if (courses.length === 0) {
+    console.log("[scheduler] No courses configured yet — skipping check.");
+    return;
+  }
 
+  console.log(`[scheduler] Checking ${courses.length} course(s) …`);
   const allResults = await checkAllCourses(courses);
   const newResults = filterNewResults(allResults);
 
   if (newResults.length > 0) {
-    console.log(`[bot] ${newResults.length} new result(s) — sending email …`);
+    console.log(`[scheduler] ${newResults.length} new result(s) — sending notification …`);
     await sendNotification(newResults);
   } else {
-    console.log("[bot] No new tee times to report.");
+    console.log("[scheduler] No new tee times to report.");
   }
 }
 
 // ---------------------------------------------------------------------------
-// Entry point — one-shot or scheduled
+// Entry point
 // ---------------------------------------------------------------------------
 
 const checkOnce = process.argv.includes("--check-once");
@@ -75,11 +61,13 @@ if (checkOnce) {
   run().catch(console.error);
 } else {
   const cronExpr = process.env.CHECK_INTERVAL ?? "*/5 * * * *";
-  console.log(`[bot] Scheduler started. Interval: "${cronExpr}"`);
+  console.log(`[bot] Scheduler started — interval: "${cronExpr}"`);
 
-  // Run immediately on startup, then on schedule
+  // Start the Telegram bot (long-polling) in parallel with the scheduler
+  startTelegramBot().catch(console.error);
+
+  // Run a check immediately on startup, then on cron schedule
   run().catch(console.error);
-
   cron.schedule(cronExpr, () => {
     run().catch(console.error);
   });
