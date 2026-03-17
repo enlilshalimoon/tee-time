@@ -1,17 +1,14 @@
 /**
  * ForeUp Software tee time checker
  *
- * How to find your schedule_id and booking_class:
- *   1. Go to your course's ForeUp booking page (often at
- *      https://<coursename>.book.teeitup.golf or a similar URL)
- *   2. Open browser DevTools → Network tab
- *   3. Trigger a date/player search
- *   4. Look for a request to foreupsoftware.com/index.php/api/booking/times
- *      The query string will contain schedule_id and booking_class
+ * Tries the direct API first. If that returns 401/403 (auth changed),
+ * falls back to loading the booking page in Chrome and intercepting
+ * the JSON responses — letting ForeUp's own JS handle auth.
  */
 
 import axios from "axios";
 import { CourseConfig, TeeTime } from "../types";
+import { checkWebScraper } from "./web-scraper";
 
 const BASE_URL = "https://foreupsoftware.com/index.php/api/booking/times";
 
@@ -32,6 +29,25 @@ export async function checkForeUp(
     throw new Error(`${course.name}: foreupScheduleId is required`);
   }
 
+  // Try direct API first
+  try {
+    return await checkForeUpApi(course, date);
+  } catch (err) {
+    const status = (err as { response?: { status?: number } })?.response?.status;
+    if (status === 401 || status === 403) {
+      console.log(`[foreup] ${course.name}: API returned ${status}, falling back to web scraper`);
+      if (course.bookingUrl) {
+        return checkWebScraper(course, date);
+      }
+    }
+    throw err;
+  }
+}
+
+async function checkForeUpApi(
+  course: CourseConfig,
+  date: string
+): Promise<TeeTime[]> {
   // ForeUp expects date as MM-DD-YYYY
   const [year, month, day] = date.split("-");
   const foreupDate = `${month}-${day}-${year}`;
@@ -43,8 +59,8 @@ export async function checkForeUp(
     players: "1",
     specials_only: "0",
     api_key: "no_limits",
-    schedule_id: course.foreupScheduleId,
-    "schedule_ids[]": course.foreupScheduleId,
+    schedule_id: course.foreupScheduleId!,
+    "schedule_ids[]": course.foreupScheduleId!,
   };
 
   if (course.foreupBookingClass) {
@@ -54,8 +70,10 @@ export async function checkForeUp(
   const response = await axios.get<ForeUpSlot[]>(BASE_URL, {
     params,
     headers: {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
       "X-Authorization": `Bearer no_limits`,
-      "Referer": "https://foreupsoftware.com/",
+      "Referer": `https://foreupsoftware.com/index.php/booking/${course.foreupScheduleId}/${course.foreupBookingClass ?? ""}`,
+      "Origin": "https://foreupsoftware.com",
     },
     timeout: 15_000,
   });

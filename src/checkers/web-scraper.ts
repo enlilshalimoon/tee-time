@@ -14,9 +14,7 @@
  * code required.
  */
 
-import fs from "fs";
-import path from "path";
-import puppeteer, { Browser, Page, HTTPResponse } from "puppeteer-core";
+import puppeteer, { Browser, Page, HTTPResponse } from "puppeteer";
 import { CourseConfig, TeeTime } from "../types";
 
 // ---------------------------------------------------------------------------
@@ -25,52 +23,10 @@ import { CourseConfig, TeeTime } from "../types";
 
 let browser: Browser | null = null;
 
-/** Find Chromium / Chrome on the system, or use CHROME_PATH env var. */
-function findChromePath(): string {
-  if (process.env.CHROME_PATH) return process.env.CHROME_PATH;
-
-  // Common locations across distros and Railway
-  const candidates = [
-    "/usr/bin/chromium-browser",
-    "/usr/bin/chromium",
-    "/usr/bin/google-chrome-stable",
-    "/usr/bin/google-chrome",
-    // Homebrew / macOS
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    // Snap
-    "/snap/bin/chromium",
-  ];
-
-  // Playwright-managed Chromium (installed via `npx playwright install chromium`)
-  // Glob the cache directory since the revision number changes with updates
-  try {
-    const playwrightCacheRoot = path.join(
-      process.env.HOME ?? "/root",
-      ".cache", "ms-playwright"
-    );
-    if (fs.existsSync(playwrightCacheRoot)) {
-      for (const entry of fs.readdirSync(playwrightCacheRoot)) {
-        if (entry.startsWith("chromium-")) {
-          const p = path.join(playwrightCacheRoot, entry, "chrome-linux", "chrome");
-          if (fs.existsSync(p)) return p;
-        }
-      }
-    }
-  } catch { /* ignore */ }
-
-  for (const p of candidates) {
-    if (fs.existsSync(p)) return p;
-  }
-
-  // Last resort — hope it's on PATH
-  return "chromium";
-}
-
 async function getBrowser(): Promise<Browser> {
   if (browser && browser.connected) return browser;
 
   browser = await puppeteer.launch({
-    executablePath: findChromePath(),
     headless: true,
     args: [
       "--no-sandbox",
