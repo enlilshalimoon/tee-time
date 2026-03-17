@@ -10,7 +10,7 @@
  */
 
 import axios from "axios";
-import { CourseConfig } from "./types";
+import { CourseConfig, CourseResult } from "./types";
 import { parseBookingUrl } from "./url-parser";
 import { addCourse, getAllCourses, removeCourseByIndex } from "./config-store";
 import { checkAllCourses } from "./checker";
@@ -146,6 +146,7 @@ async function handleHelp(chatId: string): Promise<void> {
     `/list — show monitored courses\n` +
     `/remove <number> — stop monitoring a course\n` +
     `/check — run a manual check right now\n` +
+    `/test — send a fake alert to see what notifications look like\n` +
     `/help — show this message\n\n` +
     `*Supported platforms:*\n` +
     `• ForeUp (foreupsoftware.com, teeitup.golf)\n` +
@@ -213,6 +214,37 @@ async function handleCheck(chatId: string): Promise<void> {
   }
 }
 
+async function handleTest(chatId: string): Promise<void> {
+  const courses = getAllCourses();
+  if (courses.length === 0) {
+    await sendMessage(chatId, "No courses configured. Add one first, then /test.");
+    return;
+  }
+
+  // Build a fake "newly opened" result for each course
+  const fakeResults: CourseResult[] = courses.map((course) => {
+    // Pick next Saturday
+    const now = new Date();
+    const daysUntilSat = (6 - now.getDay() + 7) % 7 || 7;
+    const sat = new Date(now);
+    sat.setDate(now.getDate() + daysUntilSat);
+    const dateStr = sat.toISOString().split("T")[0];
+
+    return {
+      course,
+      date: dateStr,
+      teeTimes: [
+        { time: "07:30", players: 4, holes: 18, price: 65, bookingUrl: course.bookingUrl },
+        { time: "09:00", players: 2, holes: 18, price: 75, bookingUrl: course.bookingUrl },
+      ],
+    };
+  });
+
+  await sendMessage(chatId, `Sending a *test notification* with ${fakeResults.length} course(s)…`);
+  await sendNotification(fakeResults);
+  await sendMessage(chatId, "✅ Test notification sent! That's what real alerts will look like.");
+}
+
 // ---------------------------------------------------------------------------
 // URL flow
 // ---------------------------------------------------------------------------
@@ -239,18 +271,58 @@ async function handleUrl(chatId: string, text: string): Promise<void> {
     teesnap: "TeeSnap",
     chronogolf: "Chronogolf/Lightspeed Golf",
   };
+
+  // If auto-detection found a real name, skip straight to time window
+  if (parsed.suggestedName) {
+    await sendMessage(
+      chatId,
+      `✅ Found *${parsed.suggestedName}* on *${platformLabel[parsed.platform] ?? parsed.platform}*!\n\n` +
+      `What *time window* do you want to monitor?\n` +
+      `Reply with e.g. \`7am-11am\`, \`6:00-10:00\`, or \`any\``
+    );
+
+    setSession(chatId, {
+      name: "awaiting_time",
+      draft: { ...parsed.partial, name: parsed.suggestedName },
+      suggestedName: parsed.suggestedName,
+    });
+  } else {
+    // Name couldn't be detected — ask the user
+    await sendMessage(
+      chatId,
+      `✅ Found a *${platformLabel[parsed.platform] ?? parsed.platform}* course!\n\n` +
+      `What's the *name* of this course? (e.g. "Rustic Canyon")`
+    );
+
+    setSession(chatId, {
+      name: "awaiting_name",
+      draft: parsed.partial,
+    });
+  }
+}
+
+async function handleAwaitingName(
+  chatId: string,
+  text: string,
+  session: Extract<Step, { name: "awaiting_name" }>
+): Promise<void> {
+  const courseName = text.trim();
+  if (courseName.length < 2) {
+    await sendMessage(chatId, "Please enter a course name (at least 2 characters).");
+    return;
+  }
+
   await sendMessage(
     chatId,
-    `✅ Found a *${platformLabel[parsed.platform] ?? parsed.platform}* course!\n` +
-    `Detected name: *${parsed.suggestedName}*\n\n` +
+    `Great — *${courseName}*!\n\n` +
     `What *time window* do you want to monitor?\n` +
     `Reply with e.g. \`7am-11am\`, \`6:00-10:00\`, or \`any\``
   );
 
   setSession(chatId, {
     name: "awaiting_time",
-    draft: { ...parsed.partial, name: parsed.suggestedName },
-    suggestedName: parsed.suggestedName,
+    draft: { ...session.draft, name: courseName },
+    suggestedName: courseName,
   });
 }
 
@@ -332,6 +404,7 @@ async function handleMessage(chatId: string, text: string): Promise<void> {
   if (t === "/help" || t === "/start") return handleHelp(chatId);
   if (t === "/list") return handleList(chatId);
   if (t === "/check") return handleCheck(chatId);
+  if (t === "/test") return handleTest(chatId);
   if (t.startsWith("/remove")) return handleRemove(chatId, t.replace("/remove", ""));
   if (t === "/cancel") {
     setSession(chatId, { name: "idle" });
@@ -341,6 +414,7 @@ async function handleMessage(chatId: string, text: string): Promise<void> {
 
   const session = getSession(chatId);
 
+  if (session.name === "awaiting_name") return handleAwaitingName(chatId, t, session);
   if (session.name === "awaiting_time") return handleAwaitingTime(chatId, t, session);
   if (session.name === "awaiting_days") return handleAwaitingDays(chatId, t, session);
 

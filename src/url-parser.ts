@@ -102,31 +102,43 @@ export async function parseBookingUrl(raw: string): Promise<ParsedCourse | null>
 // Fetch a human-readable course name from the platform API
 // ---------------------------------------------------------------------------
 
-interface ForeUpFacility {
-  name?: string;
-  facility_name?: string;
-  course_name?: string;
-}
-
 async function tryFetchCourseName(partial: Partial<CourseConfig>): Promise<string> {
   try {
     if (partial.platform === "foreup" && partial.foreupScheduleId) {
-      const resp = await axios.get<ForeUpFacility>(
-        `https://foreupsoftware.com/index.php/api/booking/${partial.foreupScheduleId}/facility`,
-        { timeout: 8_000 }
+      // Scrape the booking page HTML — the <title> tag has the course name
+      const pageUrl = `https://foreupsoftware.com/index.php/booking/${partial.foreupScheduleId}/${partial.foreupBookingClass ?? ""}`;
+      const resp = await axios.get<string>(pageUrl, {
+        timeout: 10_000,
+        headers: { "User-Agent": "Mozilla/5.0" },
+      });
+      // Title is typically "Course Name - ForeUp" or just "Course Name"
+      const titleMatch = resp.data.match(/<title[^>]*>([^<]+)<\/title>/i);
+      if (titleMatch) {
+        let name = titleMatch[1].trim();
+        // Strip common suffixes
+        name = name.replace(/\s*[-–|]\s*(ForeUp|Book Tee Times?|Online Booking).*/i, "").trim();
+        if (name && name.length > 2 && name.length < 80) return name;
+      }
+    }
+
+    if (partial.platform === "teesnap" && partial.tesnapCourseId) {
+      const resp = await axios.get<{ name?: string; courseName?: string }>(
+        `https://api.teesnap.net/v1/courses/${partial.tesnapCourseId}`,
+        { timeout: 8_000, headers: { Accept: "application/json" } }
       );
-      const name = resp.data?.name || resp.data?.facility_name || resp.data?.course_name;
-      if (name) return name as string;
+      const name = resp.data?.name || resp.data?.courseName;
+      if (name) return name;
+    }
+
+    if (partial.platform === "chronogolf" && partial.chronogolfClubId) {
+      // Use the slug as a human-readable name
+      const slug = partial.chronogolfClubId;
+      const nice = slug.replace(/[-_]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+      if (nice) return nice;
     }
   } catch {
-    // ignore
+    // ignore — we'll fall back
   }
 
-  if (partial.platform === "foreup")
-    return `Course (ForeUp #${partial.foreupScheduleId})`;
-  if (partial.platform === "teesnap")
-    return `Course (TeeSnap #${partial.tesnapCourseId})`;
-  if (partial.platform === "chronogolf")
-    return `Course (Chronogolf: ${partial.chronogolfClubId})`;
-  return "Golf Course";
+  return "";  // empty = bot should ask the user
 }
