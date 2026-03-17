@@ -148,10 +148,9 @@ async function handleHelp(chatId: string): Promise<void> {
     `/check — run a manual check right now\n` +
     `/test — send a fake alert to see what notifications look like\n` +
     `/help — show this message\n\n` +
-    `*Supported platforms:*\n` +
-    `• ForeUp (foreupsoftware.com, teeitup.golf)\n` +
-    `• TeeSnap (teesnap.net)\n` +
-    `• Chronogolf / Lightspeed Golf\n\n` +
+    `*Works with any booking site:*\n` +
+    `ForeUp, TeeSnap, Chronogolf, EZLinks, Play18, GolfNow — and any other booking page. ` +
+    `Just paste the URL and I'll figure it out.\n\n` +
     `I only alert when a slot *newly opens up* — no spam for times you already know about.`
   );
 }
@@ -256,12 +255,7 @@ async function handleUrl(chatId: string, text: string): Promise<void> {
   if (!parsed) {
     await sendMessage(
       chatId,
-      "Sorry, I couldn't recognise that URL as a supported booking platform.\n\n" +
-      "*Supported:*\n" +
-      "• ForeUp: `foreupsoftware.com` or `*.teeitup.golf`\n" +
-      "• TeeSnap: `*.teesnap.net`\n" +
-      "• Chronogolf: `chronogolf.com` or `golf.lightspeedhq.com`\n\n" +
-      "Paste the actual booking page URL from the course's website."
+      "Sorry, that doesn't look like a valid URL. Paste the full booking page URL (starting with https://)."
     );
     return;
   }
@@ -270,6 +264,7 @@ async function handleUrl(chatId: string, text: string): Promise<void> {
     foreup: "ForeUp",
     teesnap: "TeeSnap",
     chronogolf: "Chronogolf/Lightspeed Golf",
+    web: "Web Scraper",
   };
 
   // If auto-detection found a real name, skip straight to time window
@@ -418,23 +413,15 @@ async function handleMessage(chatId: string, text: string): Promise<void> {
   if (session.name === "awaiting_time") return handleAwaitingTime(chatId, t, session);
   if (session.name === "awaiting_days") return handleAwaitingDays(chatId, t, session);
 
-  // Detect booking URLs
-  const isSupportedUrl =
-    t.includes("foreupsoftware.com") ||
-    t.includes("teeitup.golf") ||
-    t.includes("teesnap.net") ||
-    t.includes("chronogolf.com") ||
-    t.includes("lightspeedhq.com") ||
-    t.includes("lightspeedgolf.com");
-
-  if (isSupportedUrl) {
-    const urlMatch = t.match(/https?:\/\/\S+/);
-    return handleUrl(chatId, urlMatch ? urlMatch[0] : t);
+  // Detect any URL — the parser will figure out the platform
+  const urlMatch = t.match(/https?:\/\/\S+/);
+  if (urlMatch) {
+    return handleUrl(chatId, urlMatch[0]);
   }
 
   await sendMessage(
     chatId,
-    "Not sure what to do with that. Send me a golf booking page URL to add a course, or type /help."
+    "Not sure what to do with that. Send me any golf booking page URL to add a course, or type /help."
   );
 }
 

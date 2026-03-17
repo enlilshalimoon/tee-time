@@ -1,4 +1,4 @@
-export type Platform = "foreup" | "teesnap" | "chronogolf";
+export type Platform = "foreup" | "teesnap" | "chronogolf" | "web";
 
 export interface CourseConfig {
   name: string;

@@ -92,33 +92,30 @@ export async function parseBookingUrl(raw: string): Promise<ParsedCourse | null>
     partial = parseChronogolf(url);
   }
 
-  if (!partial || !partial.platform) return null;
+  // Fallback: any URL we don't specifically recognise → "web" platform
+  // The universal scraper will load it in a headless browser and
+  // intercept API calls / scrape the DOM.
+  if (!partial || !partial.platform) {
+    partial = { platform: "web", bookingUrl: url.toString() };
+  }
 
-  const suggestedName = await tryFetchCourseName(partial);
-  return { partial, platform: partial.platform, suggestedName };
+  const suggestedName = await tryFetchCourseName(partial, url);
+  return { partial, platform: partial.platform!, suggestedName };
 }
 
 // ---------------------------------------------------------------------------
 // Fetch a human-readable course name from the platform API
 // ---------------------------------------------------------------------------
 
-async function tryFetchCourseName(partial: Partial<CourseConfig>): Promise<string> {
+async function tryFetchCourseName(
+  partial: Partial<CourseConfig>,
+  url?: URL
+): Promise<string> {
   try {
     if (partial.platform === "foreup" && partial.foreupScheduleId) {
-      // Scrape the booking page HTML — the <title> tag has the course name
       const pageUrl = `https://foreupsoftware.com/index.php/booking/${partial.foreupScheduleId}/${partial.foreupBookingClass ?? ""}`;
-      const resp = await axios.get<string>(pageUrl, {
-        timeout: 10_000,
-        headers: { "User-Agent": "Mozilla/5.0" },
-      });
-      // Title is typically "Course Name - ForeUp" or just "Course Name"
-      const titleMatch = resp.data.match(/<title[^>]*>([^<]+)<\/title>/i);
-      if (titleMatch) {
-        let name = titleMatch[1].trim();
-        // Strip common suffixes
-        name = name.replace(/\s*[-–|]\s*(ForeUp|Book Tee Times?|Online Booking).*/i, "").trim();
-        if (name && name.length > 2 && name.length < 80) return name;
-      }
+      const name = await fetchTitleFromPage(pageUrl);
+      if (name) return name;
     }
 
     if (partial.platform === "teesnap" && partial.tesnapCourseId) {
@@ -131,14 +128,56 @@ async function tryFetchCourseName(partial: Partial<CourseConfig>): Promise<strin
     }
 
     if (partial.platform === "chronogolf" && partial.chronogolfClubId) {
-      // Use the slug as a human-readable name
       const slug = partial.chronogolfClubId;
       const nice = slug.replace(/[-_]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
       if (nice) return nice;
     }
+
+    if (partial.platform === "web" && partial.bookingUrl) {
+      // Try to get the course name from the page <title>
+      const name = await fetchTitleFromPage(partial.bookingUrl);
+      if (name) return name;
+
+      // Fall back to deriving a name from the subdomain
+      // e.g. "losrobles.ezlinksgolf.com" → "Los Robles"
+      // e.g. "moorpark.play18.com" → "Moorpark"
+      if (url) {
+        const sub = url.hostname.split(".")[0];
+        if (sub && sub !== "www" && sub !== "api") {
+          const nice = sub
+            .replace(/[-_]/g, " ")
+            .replace(/\b\w/g, (c) => c.toUpperCase());
+          if (nice.length > 2) return nice;
+        }
+      }
+    }
   } catch {
-    // ignore — we'll fall back
+    // ignore — bot will ask the user
   }
 
-  return "";  // empty = bot should ask the user
+  return ""; // empty = bot should prompt the user for a name
+}
+
+/** Fetch a URL's <title> tag and clean it up for use as a course name. */
+async function fetchTitleFromPage(pageUrl: string): Promise<string> {
+  try {
+    const resp = await axios.get<string>(pageUrl, {
+      timeout: 10_000,
+      headers: { "User-Agent": "Mozilla/5.0" },
+      // Only read the first 50KB — we just need the <head>
+      maxContentLength: 50_000,
+    });
+    const titleMatch = resp.data.match(/<title[^>]*>([^<]+)<\/title>/i);
+    if (titleMatch) {
+      let name = titleMatch[1].trim();
+      // Strip common suffixes
+      name = name
+        .replace(/\s*[-–|:]\s*(ForeUp|Book Tee Times?|Online Booking|GolfNow|EZLinks|Play18|Reserve|Search).*/i, "")
+        .trim();
+      if (name && name.length > 2 && name.length < 80) return name;
+    }
+  } catch {
+    // ignore
+  }
+  return "";
 }

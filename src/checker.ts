@@ -2,6 +2,7 @@ import { CourseConfig, CourseResult, TeeTime } from "./types";
 import { checkForeUp } from "./checkers/foreup";
 import { checkTeeSnap } from "./checkers/teesnap";
 import { checkChronogolf } from "./checkers/chronogolf";
+import { checkWebScraper } from "./checkers/web-scraper";
 
 // ---------------------------------------------------------------------------
 // Date helpers
@@ -69,6 +70,9 @@ async function checkCourseForDate(
       break;
     case "chronogolf":
       teeTimes = await checkChronogolf(course, date);
+      break;
+    case "web":
+      teeTimes = await checkWebScraper(course, date);
       break;
     default:
       throw new Error(`Unknown platform: ${(course as CourseConfig).platform}`);
