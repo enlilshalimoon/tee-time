@@ -1,0 +1,33 @@
+{
+  "courses": [
+    {
+      "_comment": "--- ForeUp example ---",
+      "name": "Pebble Beach Golf Links",
+      "platform": "foreup",
+      "foreupScheduleId": "21",
+      "foreupBookingClass": "1308",
+      "earliestTime": "07:00",
+      "latestTime": "11:00",
+      "minPlayers": 2,
+      "daysOfWeek": [6, 0]
+    },
+    {
+      "_comment": "--- TeeSnap example ---",
+      "name": "Augusta National",
+      "platform": "teesnap",
+      "tesnapCourseId": "12345",
+      "earliestTime": "08:00",
+      "latestTime": "12:00"
+    },
+    {
+      "_comment": "--- EZLinks / GolfNow example ---",
+      "name": "Torrey Pines South",
+      "platform": "ezlinks",
+      "ezlinksFacilityId": "67890",
+      "ezlinksBookingUrl": "https://www.ezlinksgolf.com/index.html#/search?fc=67890",
+      "earliestTime": "06:00",
+      "latestTime": "10:00",
+      "daysOfWeek": [5, 6, 0]
+    }
+  ]
+}
