@@ -1,0 +1,14 @@
+{
+  "courses": [
+    {
+      "_hint": "Replace this with your real course. See README for how to find IDs.",
+      "name": "My Course",
+      "platform": "foreup",
+      "foreupScheduleId": "REPLACE_ME",
+      "foreupBookingClass": "REPLACE_ME",
+      "earliestTime": "07:00",
+      "latestTime": "11:00",
+      "daysOfWeek": [6, 0]
+    }
+  ]
+}
