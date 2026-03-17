@@ -14,6 +14,8 @@
  * code required.
  */
 
+import fs from "fs";
+import path from "path";
 import puppeteer, { Browser, Page, HTTPResponse } from "puppeteer-core";
 import { CourseConfig, TeeTime } from "../types";
 
@@ -39,8 +41,23 @@ function findChromePath(): string {
     "/snap/bin/chromium",
   ];
 
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const fs = require("fs");
+  // Playwright-managed Chromium (installed via `npx playwright install chromium`)
+  // Glob the cache directory since the revision number changes with updates
+  try {
+    const playwrightCacheRoot = path.join(
+      process.env.HOME ?? "/root",
+      ".cache", "ms-playwright"
+    );
+    if (fs.existsSync(playwrightCacheRoot)) {
+      for (const entry of fs.readdirSync(playwrightCacheRoot)) {
+        if (entry.startsWith("chromium-")) {
+          const p = path.join(playwrightCacheRoot, entry, "chrome-linux", "chrome");
+          if (fs.existsSync(p)) return p;
+        }
+      }
+    }
+  } catch { /* ignore */ }
+
   for (const p of candidates) {
     if (fs.existsSync(p)) return p;
   }

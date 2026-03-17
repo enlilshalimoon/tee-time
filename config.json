@@ -26,7 +26,9 @@
     },
     {
       "name": "Rustic Canyon",
-      "platform": "web",
+      "platform": "foreup",
+      "foreupScheduleId": "21903",
+      "foreupBookingClass": "9285",
       "bookingUrl": "https://foreupsoftware.com/index.php/booking/21903/9285#teetimes",
       "earliestTime": "05:00",
       "latestTime": "15:00",
