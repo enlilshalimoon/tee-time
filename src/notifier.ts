@@ -28,6 +28,21 @@ function friendlyTime(hhmm: string): string {
   return `${hour}:${String(m).padStart(2, "0")} ${ampm}`;
 }
 
+/** Substitute the date into a booking URL so the link goes to the right day. */
+function bookingUrlForDate(url: string, date: string): string {
+  const [year, month, day] = date.split("-");
+
+  // YYYYMMDD (e.g. teedate=20260321)
+  const yyyymmdd = /((?:teedate|date|dt|playdate|play_date|tee_date)[=/])\d{8}/i;
+  if (yyyymmdd.test(url)) return url.replace(yyyymmdd, `$1${year}${month}${day}`);
+
+  // YYYY-MM-DD (e.g. date=2026-03-21)
+  const isoDash = /((?:teedate|date|dt|playdate|play_date|tee_date)[=/])\d{4}-\d{2}-\d{2}/i;
+  if (isoDash.test(url)) return url.replace(isoDash, `$1${date}`);
+
+  return url; // no pattern found — return as-is
+}
+
 function buildMessage(results: CourseResult[]): string {
   // Group tee times by course+date so alerts are compact
   const groups = new Map<string, { course: CourseResult["course"]; date: string; times: CourseResult["teeTimes"] }>();
@@ -46,7 +61,7 @@ function buildMessage(results: CourseResult[]): string {
 
   for (const { course, date, times } of groups.values()) {
     const dateLine = friendlyDate(date);
-    const bookLink = course.bookingUrl ?? "";
+    const bookLink = bookingUrlForDate(course.bookingUrl ?? "", date);
 
     const timeList = times
       .map((tt) => {

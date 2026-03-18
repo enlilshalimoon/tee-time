@@ -14,7 +14,11 @@
  * code required.
  */
 
-import puppeteer, { Browser, Page, HTTPResponse } from "puppeteer";
+import puppeteerExtra from "puppeteer-extra";
+import StealthPlugin from "puppeteer-extra-plugin-stealth";
+import { Browser, Page, HTTPResponse } from "puppeteer";
+
+puppeteerExtra.use(StealthPlugin());
 import { CourseConfig, TeeTime } from "../types";
 
 // ---------------------------------------------------------------------------
@@ -30,7 +34,7 @@ async function getBrowser(): Promise<Browser> {
   // downloaded Chrome from ~/.cache/puppeteer rather than a system path.
   delete process.env.PUPPETEER_EXECUTABLE_PATH;
 
-  browser = await puppeteer.launch({
+  browser = await puppeteerExtra.launch({
     headless: true,
     args: [
       "--no-sandbox",
@@ -278,6 +282,79 @@ async function extractFromDOM(page: Page): Promise<TeeTime[]> {
 }
 
 // ---------------------------------------------------------------------------
+// EZLinks Angular SPA interaction
+// ---------------------------------------------------------------------------
+
+/**
+ * Drive the EZLinks Angular booking form:
+ *   1. Wait for the date input to appear (Angular finish bootstrapping).
+ *   2. Clear it and type the target date (Angular Material responds to keyboard
+ *      events, not raw value-setting).
+ *   3. Click the Search button.
+ *   4. Wait for API responses.
+ */
+async function interactEZLinks(page: Page, date: string): Promise<void> {
+  const [year, month, day] = date.split("-");
+  const mdyDate = `${month}/${day}/${year}`; // MM/DD/YYYY for Angular datepicker
+
+  // Wait up to 12 s for the Angular app to render the date input
+  const inputSelectors = [
+    "input[id*='date' i]",
+    "input[name*='date' i]",
+    "input[placeholder*='date' i]",
+    "input[formcontrolname*='date' i]",
+    "input[type='date']",
+    "input[type='text']",
+  ];
+
+  let filled = false;
+  for (const sel of inputSelectors) {
+    try {
+      await page.waitForSelector(sel, { timeout: 12_000 });
+      // Triple-click to select all existing text, then type the new date.
+      // This generates real keyboard events that Angular's change detection sees.
+      await page.click(sel, { clickCount: 3 });
+      await page.keyboard.down("Control");
+      await page.keyboard.press("a");
+      await page.keyboard.up("Control");
+      await page.type(sel, mdyDate, { delay: 40 });
+      await page.keyboard.press("Tab"); // blur to trigger Angular validation
+      filled = true;
+      console.log(`[web] EZLinks: filled date ${mdyDate} via ${sel}`);
+      break;
+    } catch {
+      // selector not found — try next
+    }
+  }
+
+  if (!filled) {
+    console.warn("[web] EZLinks: could not find date input — proceeding without form fill");
+  }
+
+  // Click Search (try several selector patterns Angular might use)
+  const btnSelectors = [
+    "button[type='submit']",
+    "input[type='submit']",
+    "button.search-btn",
+    "button.btn-search",
+    "button.btn-primary",
+    "button[class*='search' i]",
+    "button[id*='search' i]",
+  ];
+  for (const sel of btnSelectors) {
+    const btn = await page.$(sel);
+    if (btn) {
+      await btn.click();
+      console.log(`[web] EZLinks: clicked search via ${sel}`);
+      break;
+    }
+  }
+
+  // Wait up to 10 s for API responses to arrive
+  await new Promise((r) => setTimeout(r, 10_000));
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -314,12 +391,23 @@ export async function checkWebScraper(
     if (["image", "font", "media"].includes(rt)) {
       req.abort();
     } else if (targetUrl.includes("teeitup.com")) {
-      // Intercept teeitup API calls and inject holes=18 so only 18-hole
-      // tee times are returned. The page-level URL param is ignored by the SPA.
+      // The TeeItUp SPA ignores URL params; inject the correct date AND
+      // holes=18 directly into every API call it makes.
       const reqUrl = req.url();
-      if (reqUrl.includes("/api/") && !reqUrl.includes("holes=")) {
-        const sep = reqUrl.includes("?") ? "&" : "?";
-        req.continue({ url: `${reqUrl}${sep}holes=18` });
+      if (reqUrl.includes("/api/")) {
+        let newUrl = reqUrl;
+        // Fix date — replace whatever date the SPA sent with our target date
+        const dateRe = /([?&]date=)\d{4}-\d{2}-\d{2}/;
+        if (dateRe.test(newUrl)) {
+          newUrl = newUrl.replace(dateRe, `$1${date}`);
+        } else {
+          newUrl += (newUrl.includes("?") ? "&" : "?") + `date=${date}`;
+        }
+        // Ensure 18-hole filter
+        if (!newUrl.includes("holes=")) {
+          newUrl += `&holes=18`;
+        }
+        req.continue({ url: newUrl });
       } else {
         req.continue();
       }
@@ -369,34 +457,10 @@ export async function checkWebScraper(
       }
     }
 
-    // EZLinks SPA (#/search) requires filling in the date and clicking search
-    // before it fires any API calls. Try to drive the form programmatically.
+    // EZLinks SPA (#/search) is an Angular app that requires filling in the
+    // date picker and clicking Search before tee-time API calls fire.
     if (targetUrl.includes("ezlinksgolf.com")) {
-      const [year, month, day] = date.split("-");
-      const mdyDate = `${month}/${day}/${year}`; // MM/DD/YYYY
-      await page.evaluate(`(function(d) {
-        var selectors = [
-          "input[id*='date' i]",
-          "input[name*='date' i]",
-          "input[placeholder*='date' i]",
-          "input[type='date']",
-          "input[type='text']"
-        ];
-        for (var i = 0; i < selectors.length; i++) {
-          var el = document.querySelector(selectors[i]);
-          if (el) {
-            var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value') && Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-            if (setter) setter.call(el, d);
-            el.dispatchEvent(new Event('input', { bubbles: true }));
-            el.dispatchEvent(new Event('change', { bubbles: true }));
-            break;
-          }
-        }
-        var btn = document.querySelector("button[type='submit'], input[type='submit'], button.search-btn, button.btn-search");
-        if (btn) btn.click();
-      })('${mdyDate}')`);
-      // Wait for results to load after triggering the search
-      await new Promise((r) => setTimeout(r, 5_000));
+      await interactEZLinks(page, date);
     } else {
       // Give SPAs a moment to finish rendering
       await new Promise((r) => setTimeout(r, 2_000));
