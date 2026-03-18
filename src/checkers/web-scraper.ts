@@ -285,15 +285,7 @@ export async function checkWebScraper(
     throw new Error(`${course.name}: bookingUrl is required for web scraping`);
   }
 
-  let targetUrl = substituteDate(course.bookingUrl, date);
-
-  // teeitup.com booking pages support a holes= param to pre-filter results.
-  // Always request 18-hole slots only so 9-hole times never appear.
-  if (targetUrl.includes("teeitup.com")) {
-    const sep = targetUrl.includes("?") ? "&" : "?";
-    targetUrl = `${targetUrl}${sep}holes=18`;
-  }
-
+  const targetUrl = substituteDate(course.bookingUrl, date);
   console.log(`[web] ${course.name}: loading ${targetUrl}`);
 
   const b = await getBrowser();
@@ -305,6 +297,16 @@ export async function checkWebScraper(
     const rt = req.resourceType();
     if (["image", "font", "media"].includes(rt)) {
       req.abort();
+    } else if (targetUrl.includes("teeitup.com")) {
+      // Intercept teeitup API calls and inject holes=18 so only 18-hole
+      // tee times are returned. The page-level URL param is ignored by the SPA.
+      const reqUrl = req.url();
+      if (reqUrl.includes("/api/") && !reqUrl.includes("holes=")) {
+        const sep = reqUrl.includes("?") ? "&" : "?";
+        req.continue({ url: `${reqUrl}${sep}holes=18` });
+      } else {
+        req.continue();
+      }
     } else {
       req.continue();
     }
@@ -335,7 +337,21 @@ export async function checkWebScraper(
   });
 
   try {
-    await page.goto(targetUrl, { waitUntil: "networkidle2", timeout: 30_000 });
+    // Retry navigation on transient connection errors (e.g. server reset)
+    const maxAttempts = 3;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        await page.goto(targetUrl, { waitUntil: "networkidle2", timeout: 30_000 });
+        break;
+      } catch (navErr) {
+        const msg = navErr instanceof Error ? navErr.message : String(navErr);
+        const isConnectionError = msg.includes("ERR_CONNECTION") ||
+          msg.includes("Connection closed") || msg.includes("ECONNRESET");
+        if (!isConnectionError || attempt === maxAttempts) throw navErr;
+        console.warn(`[web] ${course.name}: connection error (attempt ${attempt}/${maxAttempts}), retrying…`);
+        await new Promise((r) => setTimeout(r, 2_000 * attempt));
+      }
+    }
 
     // Give SPAs a moment to finish rendering
     await new Promise((r) => setTimeout(r, 2_000));
