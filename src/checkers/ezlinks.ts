@@ -1,134 +1,39 @@
 /**
- * EZLinks Golf (iSeekGolf) API checker.
+ * EZLinks Golf (iSeekGolf) tee time checker.
  *
- * Strategy:
- *   1. Fetch the Angular app's index.html to discover the actual API endpoint
- *      (EZLinks embeds config in the page or compiles it into the main JS bundle).
- *   2. Make a direct axios request to the REST API — Node.js has a different
- *      TLS fingerprint than Chrome and is not blocked by Cloudflare BIC.
- *   3. Fall back through several known EZLinks API path patterns.
+ * The Angular SPA posts to /api/search/search on the facility subdomain.
+ * Node.js axios is not blocked by Cloudflare here (different TLS fingerprint
+ * than headless Chrome), so we call the endpoint directly.
  */
 
 import axios from "axios";
 import { CourseConfig, TeeTime } from "../types";
 
 const BROWSER_HEADERS = {
-  "accept": "application/json, text/plain, */*",
+  accept: "application/json, text/plain, */*",
   "accept-language": "en-US,en;q=0.9",
+  "content-type": "application/json",
   "user-agent":
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
   "x-requested-with": "XMLHttpRequest",
 };
 
-function baseUrl(bookingUrl: string): string {
-  const u = new URL(bookingUrl);
-  return `${u.protocol}//${u.host}`;
-}
-
 // ---------------------------------------------------------------------------
-// API endpoint discovery — read the Angular bundle to find the real path
-// ---------------------------------------------------------------------------
-
-// Cache so we only crawl each facility once per process run
-const discoveredApiBase = new Map<string, string>();
-
-async function discoverApiBase(facilityBase: string): Promise<string | null> {
-  if (discoveredApiBase.has(facilityBase)) return discoveredApiBase.get(facilityBase)!;
-
-  const headers = { ...BROWSER_HEADERS, referer: facilityBase + "/" };
-
-  try {
-    // 1. Fetch index.html
-    const htmlResp = await axios.get(`${facilityBase}/index.html`, {
-      headers: { ...headers, accept: "text/html,*/*" },
-      timeout: 10_000,
-    });
-    const html = String(htmlResp.data);
-    console.log(`[ezlinks] index.html status: ${htmlResp.status}, length: ${html.length}`);
-    console.log(`[ezlinks] index.html snippet: ${html.slice(0, 500)}`);
-
-    // 2. Look for inline window config (common Angular pattern)
-    const envPatterns = [
-      /window\.__env\s*=\s*({[\s\S]*?});/,
-      /window\.env\s*=\s*({[\s\S]*?});/,
-      /apiUrl\s*:\s*["']([^"']+)["']/,
-      /baseUrl\s*:\s*["']([^"']+)["']/,
-      /apiBase\s*:\s*["']([^"']+)["']/,
-    ];
-    for (const re of envPatterns) {
-      const m = html.match(re);
-      if (m) {
-        console.log(`[ezlinks] Found inline config: ${m[0].slice(0, 200)}`);
-        // If it's a JSON object, try to parse
-        try {
-          const obj = JSON.parse(m[1]);
-          const apiUrl = obj.apiUrl ?? obj.baseUrl ?? obj.apiBase;
-          if (apiUrl) { discoveredApiBase.set(facilityBase, apiUrl); return apiUrl; }
-        } catch {
-          // m[1] might be the URL directly (from the third pattern)
-          if (m[1]?.startsWith("http")) { discoveredApiBase.set(facilityBase, m[1]); return m[1]; }
-        }
-      }
-    }
-
-    // 3. Find the main Angular JS bundle and search it for the API URL
-    const scriptMatches = [...html.matchAll(/src="([^"]*(?:main|vendor|chunk)[^"]*\.js)"/g)];
-    console.log(`[ezlinks] Found ${scriptMatches.length} script(s): ${scriptMatches.map(m => m[1]).join(", ")}`);
-
-    for (const match of scriptMatches.slice(0, 3)) {
-      let scriptSrc = match[1];
-      if (!scriptSrc.startsWith("http")) scriptSrc = `${facilityBase}/${scriptSrc.replace(/^\//, "")}`;
-      try {
-        const jsResp = await axios.get(scriptSrc, { headers, timeout: 20_000 });
-        const js = String(jsResp.data);
-        console.log(`[ezlinks] bundle ${scriptSrc} length: ${js.length}`);
-
-        // Search for API URL strings in the minified JS
-        const apiPatterns = [
-          /["'](https?:\/\/[^"']*(?:api|services?|booking)[^"']*)/g,
-          /"(\/api\/v\d[^"]+)"/g,
-          /apiUrl["'\s:]+["']([^"']+)["']/g,
-        ];
-        for (const re of apiPatterns) {
-          let m: RegExpExecArray | null;
-          while ((m = re.exec(js)) !== null) {
-            const candidate = m[1];
-            if (candidate.length < 100 && (candidate.includes("api") || candidate.includes("service"))) {
-              console.log(`[ezlinks] Found API URL in bundle: ${candidate}`);
-              const apiBase = candidate.startsWith("http") ? candidate : `${facilityBase}${candidate}`;
-              discoveredApiBase.set(facilityBase, apiBase);
-              return apiBase;
-            }
-          }
-        }
-      } catch (e) {
-        console.warn(`[ezlinks] Failed to fetch bundle ${scriptSrc}: ${e}`);
-      }
-    }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`[ezlinks] HTML discovery failed: ${msg}`);
-  }
-
-  return null;
-}
-
-// ---------------------------------------------------------------------------
-// Heuristic tee-time extraction
+// Heuristic tee-time extraction (handles unknown response shape)
 // ---------------------------------------------------------------------------
 
 const TIME_KEYS = [
   "time", "startTime", "start_time", "teeTime", "tee_time",
   "StartTime", "teetime", "start", "TeeTime", "teeOffTime",
-  "displayTime", "scheduledTime", "scheduled_time", "teeTimeSlot",
-  "slot_time", "tee_off_time", "formattedTime",
+  "displayTime", "scheduledTime", "scheduled_time", "formattedTime",
+  "slot_time",
 ];
 const AVAIL_KEYS = [
   "available_spots", "availableSlots", "spots", "available", "openSlots",
   "maxPlayers", "remainingSlots", "NumberOfPlayersAvailable", "availablePlayers",
   "spotsAvailable", "playersAvailable", "nb_available_spots", "slotsAvailable",
-  "availSpots", "openings", "maxAvailableSpots",
+  "openings", "maxAvailableSpots",
 ];
 const PRICE_KEYS = [
   "price", "green_fee", "greenFee", "rate", "baseRate", "amount", "fee",
@@ -144,11 +49,14 @@ function findArrays(data: unknown, depth = 0): Array<Record<string, unknown>[]> 
   if (depth > 8) return [];
   const out: Array<Record<string, unknown>[]> = [];
   if (Array.isArray(data)) {
-    const objs = data.filter(v => typeof v === "object" && v !== null && !Array.isArray(v)) as Record<string, unknown>[];
+    const objs = data.filter(
+      (v) => typeof v === "object" && v !== null && !Array.isArray(v)
+    ) as Record<string, unknown>[];
     if (objs.length > 0) out.push(objs);
     for (const item of data) out.push(...findArrays(item, depth + 1));
   } else if (typeof data === "object" && data !== null) {
-    for (const v of Object.values(data as Record<string, unknown>)) out.push(...findArrays(v, depth + 1));
+    for (const v of Object.values(data as Record<string, unknown>))
+      out.push(...findArrays(v, depth + 1));
   }
   return out;
 }
@@ -168,18 +76,20 @@ function normalizeTime(raw: string): string {
 }
 
 function extractTimes(data: unknown): TeeTime[] | null {
-  // Log the top-level structure for debugging
   if (typeof data === "object" && data !== null) {
-    console.log(`[ezlinks] Response top-level keys: ${Object.keys(data as Record<string, unknown>).join(", ")}`);
+    console.log(
+      `[ezlinks] response top-level keys: ${Object.keys(data as Record<string, unknown>).join(", ")}`
+    );
   }
 
   for (const arr of findArrays(data)) {
     if (arr.length === 0) continue;
-    // Log first item's keys for debugging
-    console.log(`[ezlinks] Array candidate (${arr.length} items), first-item keys: ${Object.keys(arr[0]).join(", ")}`);
+    console.log(
+      `[ezlinks] array candidate (${arr.length} items), first-item keys: ${Object.keys(arr[0]).join(", ")}`
+    );
 
-    const hits = arr.filter(o => !!pick(o, TIME_KEYS));
-    if (hits.length < 1) continue;  // relaxed: even 1 item is worth trying
+    const hits = arr.filter((o) => !!pick(o, TIME_KEYS));
+    if (hits.length < 1) continue;
 
     const times: TeeTime[] = [];
     for (const item of arr) {
@@ -189,9 +99,13 @@ function extractTimes(data: unknown): TeeTime[] | null {
       let price: number | undefined;
       const rp = pick<unknown>(item, PRICE_KEYS);
       if (typeof rp === "number") price = rp;
-      else if (typeof rp === "string") { const n = parseFloat(rp.replace(/[$,]/g, "")); if (!isNaN(n)) price = n; }
-      else if (typeof rp === "object" && rp !== null) {
-        const inner = (rp as Record<string, unknown>).amount ?? (rp as Record<string, unknown>).price;
+      else if (typeof rp === "string") {
+        const n = parseFloat(rp.replace(/[$,]/g, ""));
+        if (!isNaN(n)) price = n;
+      } else if (typeof rp === "object" && rp !== null) {
+        const inner =
+          (rp as Record<string, unknown>).amount ??
+          (rp as Record<string, unknown>).price;
         if (typeof inner === "number") price = inner;
       }
       times.push({
@@ -207,62 +121,72 @@ function extractTimes(data: unknown): TeeTime[] | null {
 }
 
 // ---------------------------------------------------------------------------
+// Request body builders — try most-likely format first, fall back if empty
+// ---------------------------------------------------------------------------
+
+function baseUrl(bookingUrl: string): string {
+  const u = new URL(bookingUrl);
+  return `${u.protocol}//${u.host}`;
+}
+
+function buildBodies(date: string): Record<string, unknown>[] {
+  const [year, month, day] = date.split("-");
+  const mmddyyyy = `${month}/${day}/${year}`; // EZLinks date picker format
+  return [
+    // Format 1: ISO date with holes/players
+    { date, holes: 18, players: 1 },
+    // Format 2: MM/DD/YYYY (Angular datepicker format)
+    { date: mmddyyyy, holes: 18, players: 1 },
+    // Format 3: nested search object
+    { search: { date, holes: 18, players: 1 } },
+    // Format 4: camelCase field names
+    { searchDate: date, numberOfHoles: 18, numberOfPlayers: 1 },
+    // Format 5: with timeFrom/timeTo (some EZLinks installs)
+    { date, holes: 18, players: 1, timeFrom: "0500", timeTo: "1800" },
+  ];
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
-export async function checkEZLinks(course: CourseConfig, date: string): Promise<TeeTime[]> {
+export async function checkEZLinks(
+  course: CourseConfig,
+  date: string // YYYY-MM-DD
+): Promise<TeeTime[]> {
   if (!course.bookingUrl) throw new Error(`${course.name}: bookingUrl required`);
 
   const base = baseUrl(course.bookingUrl);
+  const endpoint = `${base}/api/search/search`;
   const headers = { ...BROWSER_HEADERS, referer: base + "/" };
-  const [year, month, day] = date.split("-");
 
-  // Run HTML/JS discovery once to find the actual API base
-  const discovered = await discoverApiBase(base);
-  if (discovered) console.log(`[ezlinks] ${course.name}: discovered API base: ${discovered}`);
-
-  // Build candidate URLs — include discovered base + known fallback patterns
-  const candidates: string[] = [];
-  if (discovered) {
-    // If discovered base ends in /api/v1 etc., append tee-time paths
-    const db = discovered.replace(/\/$/, "");
-    candidates.push(
-      `${db}/teesheets?date=${date}&players=1`,
-      `${db}/teetimes?date=${date}&players=1`,
-      `${db}/teesheets?date=${month}/${day}/${year}&players=1`,
-    );
-  }
-  // Always try the standard known patterns
-  candidates.push(
-    `${base}/api/v1/teesheets?date=${date}&players=1`,
-    `${base}/api/v1/teetimes?date=${date}&players=1`,
-    `${base}/api/v1/courses/teesheets?date=${date}&players=1`,
-    `${base}/api/v2/teesheets?date=${date}&players=1`,
-    `${base}/api/v1/teesheets?date=${month}/${day}/${year}&players=1`,
-    `${base}/api/v1/teesheets?startDate=${date}&numberOfPlayers=1`,
-    `${base}/api/teesheets?date=${date}&players=1`,
-    `${base}/booking/api/v1/teesheets?date=${date}&players=1`,
-  );
-
-  const errors: string[] = [];
-  for (const url of candidates) {
+  for (const body of buildBodies(date)) {
     try {
-      console.log(`[ezlinks] ${course.name}: GET ${url}`);
-      const resp = await axios.get(url, { headers, timeout: 10_000 });
+      console.log(`[ezlinks] ${course.name}: POST ${endpoint} body=${JSON.stringify(body)}`);
+      const resp = await axios.post(endpoint, body, { headers, timeout: 15_000 });
       const times = extractTimes(resp.data);
       if (times && times.length > 0) {
-        console.log(`[ezlinks] ${course.name}: ✓ ${times.length} slot(s) from ${url}`);
-        return times.filter(t => t.players > 0);
+        console.log(`[ezlinks] ${course.name}: ✓ ${times.length} slot(s) on ${date}`);
+        return times.filter((t) => t.players > 0);
       }
-      errors.push(`${url.split("?")[0]}: 200 but no times (keys: ${typeof resp.data === "object" ? Object.keys(resp.data ?? {}).join(",") : typeof resp.data})`);
+      // Got 200 but no parseable times — log shape and try next body format
+      console.log(
+        `[ezlinks] ${course.name}: 200 but no times extracted. ` +
+        `Response type: ${typeof resp.data}, ` +
+        `keys: ${typeof resp.data === "object" ? Object.keys(resp.data ?? {}).slice(0, 10).join(",") : "n/a"}`
+      );
     } catch (err) {
       const e = err instanceof Error ? err.message : String(err);
-      errors.push(`${url.split("?")[0]}: ${e}`);
+      // 4xx from first body format → try next; connection errors → bail
+      const isConnError = e.includes("ECONNRESET") || e.includes("ECONNREFUSED") ||
+        e.includes("timeout") || e.includes("socket hang");
+      if (isConnError) throw new Error(`EZLinks connection error for ${course.name}: ${e}`);
+      console.warn(`[ezlinks] ${course.name}: POST failed (${e}) — trying next body format`);
     }
   }
 
-  throw new Error(
-    `EZLinks API unreachable for ${course.name}.\n` +
-    errors.map(e => `  ${e}`).join("\n")
-  );
+  // Tried all body formats, none worked — return empty rather than throwing
+  // so the bot doesn't report a noisy error chain
+  console.warn(`[ezlinks] ${course.name}: all body formats tried, no times returned for ${date}`);
+  return [];
 }
