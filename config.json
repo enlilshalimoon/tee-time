@@ -37,7 +37,7 @@
     {
       "name": "Los Verdes",
       "platform": "web",
-      "bookingUrl": "https://los-verdes-golf-course-public.book.teeitup.com/teetimes",
+      "bookingUrl": "https://los-verdes-golf-course-public.book.teeitup.com/teetimes?course=832&date=2026-03-21&holes=18&max=999999",
       "earliestTime": "05:00",
       "latestTime": "15:00",
       "daysOfWeek": [6, 0],

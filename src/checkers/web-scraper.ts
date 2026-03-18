@@ -353,8 +353,38 @@ export async function checkWebScraper(
       }
     }
 
-    // Give SPAs a moment to finish rendering
-    await new Promise((r) => setTimeout(r, 2_000));
+    // EZLinks SPA (#/search) requires filling in the date and clicking search
+    // before it fires any API calls. Try to drive the form programmatically.
+    if (targetUrl.includes("ezlinksgolf.com")) {
+      const [year, month, day] = date.split("-");
+      const mdyDate = `${month}/${day}/${year}`; // MM/DD/YYYY
+      await page.evaluate(`(function(d) {
+        var selectors = [
+          "input[id*='date' i]",
+          "input[name*='date' i]",
+          "input[placeholder*='date' i]",
+          "input[type='date']",
+          "input[type='text']"
+        ];
+        for (var i = 0; i < selectors.length; i++) {
+          var el = document.querySelector(selectors[i]);
+          if (el) {
+            var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value') && Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+            if (setter) setter.call(el, d);
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            break;
+          }
+        }
+        var btn = document.querySelector("button[type='submit'], input[type='submit'], button.search-btn, button.btn-search");
+        if (btn) btn.click();
+      })('${mdyDate}')`);
+      // Wait for results to load after triggering the search
+      await new Promise((r) => setTimeout(r, 5_000));
+    } else {
+      // Give SPAs a moment to finish rendering
+      await new Promise((r) => setTimeout(r, 2_000));
+    }
 
     // Return the best intercepted result (prefer the largest set)
     if (intercepted.length > 0) {
