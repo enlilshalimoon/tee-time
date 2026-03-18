@@ -4,6 +4,7 @@ import { checkTeeSnap } from "./checkers/teesnap";
 import { checkChronogolf } from "./checkers/chronogolf";
 import { checkWebScraper } from "./checkers/web-scraper";
 import { checkEZLinks } from "./checkers/ezlinks";
+import { checkTeeItUp } from "./checkers/teeitup";
 
 // ---------------------------------------------------------------------------
 // Date helpers
@@ -80,6 +81,9 @@ async function checkCourseForDate(
       break;
     case "ezlinks":
       teeTimes = await checkEZLinks(course, date);
+      break;
+    case "teeitup":
+      teeTimes = await checkTeeItUp(course, date);
       break;
     default:
       throw new Error(`Unknown platform: ${(course as CourseConfig).platform}`);
