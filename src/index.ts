@@ -1,6 +1,6 @@
 import "dotenv/config";
 import cron from "node-cron";
-import { getAllCourses } from "./config-store";
+import { getAllCourses, getNotificationChatId } from "./config-store";
 import { checkAllCourses } from "./checker";
 import { filterNewlyOpened } from "./change-detector";
 import { sendNotification } from "./notifier";
@@ -26,7 +26,7 @@ async function run(): Promise<void> {
   if (newResults.length > 0) {
     const count = newResults.reduce((n, r) => n + r.teeTimes.length, 0);
     console.log(`[scheduler] ${count} newly opened slot(s) — sending notification …`);
-    await sendNotification(newResults);
+    await sendNotification(newResults, getNotificationChatId());
   } else {
     console.log("[scheduler] No newly opened tee times.");
   }

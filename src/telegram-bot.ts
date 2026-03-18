@@ -15,7 +15,7 @@
 import axios from "axios";
 import { CourseConfig, CourseResult } from "./types";
 import { parseBookingUrl, ParsedCourse } from "./url-parser";
-import { addCourse, getAllCourses, removeCourseByIndex, updateCourseByIndex } from "./config-store";
+import { addCourse, getAllCourses, removeCourseByIndex, updateCourseByIndex, setNotificationChatId } from "./config-store";
 import { checkAllCoursesDetailed } from "./checker";
 import { sendNotification } from "./notifier";
 
@@ -551,6 +551,11 @@ async function handleAwaitingDays(
 async function handleMessage(chatId: string, text: string): Promise<void> {
   const t = text.trim();
   const cmd = t.split(/\s|@/)[0].toLowerCase();
+
+  // Any slash command from any chat updates the notification target
+  if (cmd.startsWith("/")) {
+    setNotificationChatId(chatId);
+  }
 
   if (cmd === "/help" || cmd === "/start") return handleHelp(chatId);
   if (cmd === "/add") return handleAdd(chatId);

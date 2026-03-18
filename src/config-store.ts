@@ -9,14 +9,34 @@ import { CourseConfig } from "./types";
 
 const CONFIG_PATH = path.resolve(process.cwd(), "config.json");
 
-function readConfig(): { courses: CourseConfig[] } {
-  if (!fs.existsSync(CONFIG_PATH)) return { courses: [] };
-  const raw = fs.readFileSync(CONFIG_PATH, "utf-8");
-  return JSON.parse(raw) as { courses: CourseConfig[] };
+interface Config {
+  courses: CourseConfig[];
+  notificationChatId?: string;
 }
 
-function writeConfig(data: { courses: CourseConfig[] }): void {
+function readConfig(): Config {
+  if (!fs.existsSync(CONFIG_PATH)) return { courses: [] };
+  const raw = fs.readFileSync(CONFIG_PATH, "utf-8");
+  return JSON.parse(raw) as Config;
+}
+
+function writeConfig(data: Config): void {
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(data, null, 2), "utf-8");
+}
+
+/** Returns the chat ID where background notifications should be sent.
+ *  Falls back to TELEGRAM_CHAT_ID env var if never set via bot. */
+export function getNotificationChatId(): string {
+  const stored = readConfig().notificationChatId;
+  return stored ?? process.env.TELEGRAM_CHAT_ID ?? "";
+}
+
+/** Persist the chat that should receive background notifications. */
+export function setNotificationChatId(chatId: string): void {
+  const data = readConfig();
+  if (data.notificationChatId === chatId) return; // no-op if unchanged
+  data.notificationChatId = chatId;
+  writeConfig(data);
 }
 
 export function getAllCourses(): CourseConfig[] {

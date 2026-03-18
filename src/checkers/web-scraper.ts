@@ -285,7 +285,15 @@ export async function checkWebScraper(
     throw new Error(`${course.name}: bookingUrl is required for web scraping`);
   }
 
-  const targetUrl = substituteDate(course.bookingUrl, date);
+  let targetUrl = substituteDate(course.bookingUrl, date);
+
+  // teeitup.com booking pages support a holes= param to pre-filter results.
+  // Always request 18-hole slots only so 9-hole times never appear.
+  if (targetUrl.includes("teeitup.com")) {
+    const sep = targetUrl.includes("?") ? "&" : "?";
+    targetUrl = `${targetUrl}${sep}holes=18`;
+  }
+
   console.log(`[web] ${course.name}: loading ${targetUrl}`);
 
   const b = await getBrowser();
