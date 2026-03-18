@@ -13,12 +13,27 @@ import { checkWebScraper } from "./web-scraper";
 const BASE_URL = "https://foreupsoftware.com/index.php/api/booking/times";
 
 interface ForeUpSlot {
-  time: string;          // "07:00"
+  time: string;          // "07:00" or "7:00 AM" depending on installation
   available_spots: number;
   holes: number;
   green_fee?: string;
   booking_url?: string;
   [key: string]: unknown;
+}
+
+/** Normalize any time format to "HH:MM" (24-hour) for consistent comparisons. */
+function parseTime(raw: string): string {
+  const ampm = raw.match(/(\d{1,2}):(\d{2})\s*([APap][Mm])/);
+  if (ampm) {
+    let h = parseInt(ampm[1], 10);
+    const m = ampm[2];
+    if (ampm[3].toLowerCase().startsWith("p") && h !== 12) h += 12;
+    if (ampm[3].toLowerCase().startsWith("a") && h === 12) h = 0;
+    return `${String(h).padStart(2, "0")}:${m}`;
+  }
+  const hhmm = raw.match(/(\d{1,2}):(\d{2})/);
+  if (hhmm) return `${hhmm[1].padStart(2, "0")}:${hhmm[2]}`;
+  return raw;
 }
 
 export async function checkForeUp(
@@ -89,7 +104,7 @@ async function checkForeUpApi(
   return slots
     .filter((slot) => slot.available_spots > 0)
     .map((slot) => ({
-      time: slot.time,
+      time: parseTime(slot.time),
       players: slot.available_spots,
       holes: slot.holes ?? 18,
       price: slot.green_fee ? parseFloat(slot.green_fee) : undefined,
