@@ -2,8 +2,9 @@
   "courses": [
     {
       "name": "Los Robles",
-      "platform": "ezlinks",
-      "bookingUrl": "https://losrobles.ezlinksgolf.com/index.html#/search",
+      "platform": "chronogolf",
+      "chronogolfClubId": "los-robles-greens-golf-course",
+      "bookingUrl": "https://www.chronogolf.com/club/los-robles-greens-golf-course",
       "earliestTime": "05:00",
       "latestTime": "15:00",
       "daysOfWeek": [6, 0]
@@ -18,8 +19,9 @@
     },
     {
       "name": "Tierra Rejada",
-      "platform": "ezlinks",
-      "bookingUrl": "https://tierrarejadapubpp.ezlinksgolf.com/index.html#/search",
+      "platform": "chronogolf",
+      "chronogolfClubId": "tierra-rejada-golf-club",
+      "bookingUrl": "https://www.chronogolf.com/club/tierra-rejada-golf-club",
       "earliestTime": "05:00",
       "latestTime": "15:00",
       "daysOfWeek": [6, 0]

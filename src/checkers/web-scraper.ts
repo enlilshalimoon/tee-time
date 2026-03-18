@@ -37,11 +37,6 @@ async function getBrowser(): Promise<Browser> {
       "--disable-setuid-sandbox",
       "--disable-dev-shm-usage",
       "--disable-gpu",
-      "--single-process",
-      // Suppress the Automation flag that sites use to detect headless Chrome
-      "--disable-blink-features=AutomationControlled",
-      "--disable-infobars",
-      "--window-size=1280,800",
     ],
   });
   return browser;
@@ -367,18 +362,6 @@ export async function checkWebScraper(
 
   const b = await getBrowser();
   const page = await b.newPage();
-
-  // Mask automation signals that sites use to block headless browsers
-  await page.evaluateOnNewDocument(`
-    Object.defineProperty(navigator, 'webdriver', { get: () => false });
-    Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
-    Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-    window.chrome = { runtime: {} };
-  `);
-  await page.setViewport({ width: 1280, height: 800 });
-  await page.setExtraHTTPHeaders({
-    "accept-language": "en-US,en;q=0.9",
-  });
 
   // Reduce resource loading for speed
   await page.setRequestInterception(true);
