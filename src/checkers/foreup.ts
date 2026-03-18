@@ -55,13 +55,19 @@ async function checkForeUpApi(
   const params: Record<string, string> = {
     time: "all",
     date: foreupDate,
-    holes: "18",
     players: "1",
     specials_only: "0",
     api_key: "no_limits",
     schedule_id: course.foreupScheduleId!,
     "schedule_ids[]": course.foreupScheduleId!,
   };
+
+  // Only filter by holes at the API level if the course requires 18-hole rounds.
+  // Omitting the param returns all hole counts (9 and 18); minHoles filtering
+  // in checker.ts handles any post-fetch restriction.
+  if (course.minHoles) {
+    params.holes = String(course.minHoles);
+  }
 
   if (course.foreupBookingClass) {
     params.booking_class = course.foreupBookingClass;
