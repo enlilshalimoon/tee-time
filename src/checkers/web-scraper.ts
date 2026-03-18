@@ -387,21 +387,24 @@ export async function checkWebScraper(
     if (["image", "font", "media"].includes(rt)) {
       req.abort();
     } else if (targetUrl.includes("teeitup.com")) {
-      // The TeeItUp SPA ignores URL params; inject the correct date AND
-      // holes=18 directly into every API call it makes.
+      // The TeeItUp SPA ignores the URL's date/holes params — the SPA uses its
+      // own internal state. Intercept XHR/fetch data calls and force the correct
+      // date and holes=18 regardless of what the SPA sends.
       const reqUrl = req.url();
-      if (reqUrl.includes("/api/")) {
+      const rt = req.resourceType();
+      if (rt === "xhr" || rt === "fetch") {
         let newUrl = reqUrl;
-        // Fix date — replace whatever date the SPA sent with our target date
-        const dateRe = /([?&]date=)\d{4}-\d{2}-\d{2}/;
+        // Replace any date param the SPA included with our target date
+        const dateRe = /([?&](?:date|teedate|tee_date|playdate)=)\d{4}-\d{2}-\d{2}/i;
         if (dateRe.test(newUrl)) {
           newUrl = newUrl.replace(dateRe, `$1${date}`);
-        } else {
-          newUrl += (newUrl.includes("?") ? "&" : "?") + `date=${date}`;
+        } else if (newUrl.includes("?")) {
+          newUrl += `&date=${date}`;
         }
-        // Ensure 18-hole filter
-        if (!newUrl.includes("holes=")) {
-          newUrl += `&holes=18`;
+        // Force 18-hole filter
+        if (!newUrl.includes("holes=")) newUrl += `&holes=18`;
+        if (newUrl !== reqUrl) {
+          console.log(`[web] teeitup intercept: ${reqUrl.slice(0, 100)} → date=${date}`);
         }
         req.continue({ url: newUrl });
       } else {
