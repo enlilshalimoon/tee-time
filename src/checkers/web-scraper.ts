@@ -14,11 +14,7 @@
  * code required.
  */
 
-import puppeteerExtra from "puppeteer-extra";
-import StealthPlugin from "puppeteer-extra-plugin-stealth";
-import { Browser, Page, HTTPResponse } from "puppeteer";
-
-puppeteerExtra.use(StealthPlugin());
+import puppeteer, { Browser, Page, HTTPResponse } from "puppeteer";
 import { CourseConfig, TeeTime } from "../types";
 
 // ---------------------------------------------------------------------------
@@ -34,7 +30,7 @@ async function getBrowser(): Promise<Browser> {
   // downloaded Chrome from ~/.cache/puppeteer rather than a system path.
   delete process.env.PUPPETEER_EXECUTABLE_PATH;
 
-  browser = await puppeteerExtra.launch({
+  browser = await puppeteer.launch({
     headless: true,
     args: [
       "--no-sandbox",

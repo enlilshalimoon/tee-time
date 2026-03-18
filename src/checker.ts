@@ -3,6 +3,7 @@ import { checkForeUp } from "./checkers/foreup";
 import { checkTeeSnap } from "./checkers/teesnap";
 import { checkChronogolf } from "./checkers/chronogolf";
 import { checkWebScraper } from "./checkers/web-scraper";
+import { checkEZLinks } from "./checkers/ezlinks";
 
 // ---------------------------------------------------------------------------
 // Date helpers
@@ -77,6 +78,9 @@ async function checkCourseForDate(
     case "web":
       teeTimes = await checkWebScraper(course, date);
       break;
+    case "ezlinks":
+      teeTimes = await checkEZLinks(course, date);
+      break;
     default:
       throw new Error(`Unknown platform: ${(course as CourseConfig).platform}`);
   }
@@ -124,8 +128,12 @@ export async function checkAllCoursesDetailed(
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error(`[checker] ${course.name} on ${date}: ERROR — ${msg}`);
-        // Only record the first error per course to avoid spamming
         if (!courseErrorMsg) courseErrorMsg = msg;
+        // Connection-level errors won't resolve for other dates on the same
+        // course — stop trying immediately rather than waiting 30s per date.
+        const isConnError = msg.includes("Connection closed") ||
+          msg.includes("ERR_CONNECTION") || msg.includes("ECONNRESET");
+        if (isConnError) break;
       }
     }
 
