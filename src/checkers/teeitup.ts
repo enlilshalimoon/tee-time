@@ -12,10 +12,23 @@
  *   facilityId → facility_id query param
  */
 
-import axios from "axios";
+import axios, { AxiosError } from "axios";
 import { CourseConfig, TeeTime } from "../types";
 
-const KENNA_API = "https://phx-api-be-east-1b.kenna.io/tee-times";
+const KENNA_BASE = "https://phx-api-be-east-1b.kenna.io";
+
+// Ordered list of candidate paths to try if the first one fails.
+const CANDIDATE_PATHS = [
+  "/v1/tee-times",
+  "/tee-times",
+  "/tee_times",
+  "/v1/tee_times",
+  "/api/tee-times",
+  "/api/v1/tee-times",
+];
+
+// Cache the first path that works so we don't probe on every call.
+let workingPath: string | null = null;
 
 interface KennaSlot {
   time?: string;
@@ -73,6 +86,33 @@ function parseSlots(data: unknown): TeeTime[] {
     });
 }
 
+async function probePath(
+  path: string,
+  facilityId: string,
+  alias: string,
+  date: string,
+  bookingUrl: string
+): Promise<unknown> {
+  const resp = await axios.get(`${KENNA_BASE}${path}`, {
+    params: {
+      facility_id: facilityId,
+      date,
+      holes: 18,
+      players: 1,
+    },
+    headers: {
+      "x-be-alias": alias,
+      Accept: "application/json",
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      Referer: bookingUrl,
+      Origin: `https://${alias}.book.teeitup.com`,
+    },
+    timeout: 15_000,
+  });
+  return resp.data;
+}
+
 export async function checkTeeItUp(
   course: CourseConfig,
   date: string // YYYY-MM-DD
@@ -90,26 +130,42 @@ export async function checkTeeItUp(
   // e.g. "los-verdes-golf-course-public" from "los-verdes-golf-course-public.book.teeitup.com"
   const alias = url.hostname.split(".")[0];
 
-  console.log(`[teeitup] ${course.name}: calling Kenna API facility_id=${facilityId} alias=${alias} date=${date}`);
+  // If we already found a working path, use it directly.
+  if (workingPath) {
+    console.log(`[teeitup] ${course.name}: ${KENNA_BASE}${workingPath} facility_id=${facilityId} date=${date}`);
+    const data = await probePath(workingPath, facilityId, alias, date, course.bookingUrl);
+    const slots = parseSlots(data);
+    console.log(`[teeitup] ${course.name}: ${slots.length} slot(s) on ${date}`);
+    return slots;
+  }
 
-  const resp = await axios.get(KENNA_API, {
-    params: {
-      facility_id: facilityId,
-      date,
-      holes: 18,
-      players: 1,
-    },
-    headers: {
-      "x-be-alias": alias,
-      Accept: "application/json",
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-      Referer: course.bookingUrl,
-    },
-    timeout: 15_000,
-  });
+  // Probe candidate paths until one responds with non-404.
+  console.log(`[teeitup] ${course.name}: probing API paths for facility_id=${facilityId} alias=${alias}`);
+  const errors: string[] = [];
+  for (const path of CANDIDATE_PATHS) {
+    try {
+      console.log(`[teeitup] trying ${KENNA_BASE}${path}`);
+      const data = await probePath(path, facilityId, alias, date, course.bookingUrl);
+      workingPath = path;
+      console.log(`[teeitup] found working path: ${path}`);
+      const slots = parseSlots(data);
+      console.log(`[teeitup] ${course.name}: ${slots.length} slot(s) on ${date}`);
+      return slots;
+    } catch (err) {
+      const status = (err as AxiosError)?.response?.status;
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push(`  ${path} → ${status ?? msg}`);
+      // Only skip to next path on 404; other errors (403, 5xx, network) should surface
+      if (status !== 404) {
+        throw new Error(
+          `Kenna API ${path} returned ${status ?? "error"}: ${msg}\nTried paths:\n${errors.join("\n")}`
+        );
+      }
+    }
+  }
 
-  const slots = parseSlots(resp.data);
-  console.log(`[teeitup] ${course.name}: ${slots.length} slot(s) on ${date}`);
-  return slots;
+  throw new Error(
+    `Kenna API: all candidate paths returned 404.\nTried:\n${errors.join("\n")}\n` +
+    `Please capture the XHR request from browser DevTools on ${course.bookingUrl} and share the API URL.`
+  );
 }
