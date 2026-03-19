@@ -2,7 +2,7 @@
   "courses": [
     {
       "name": "Los Robles",
-      "platform": "ezlinks",
+      "platform": "web",
       "bookingUrl": "https://losrobles.ezlinksgolf.com/index.html#/search",
       "earliestTime": "05:00",
       "latestTime": "15:00",
@@ -18,7 +18,7 @@
     },
     {
       "name": "Tierra Rejada",
-      "platform": "ezlinks",
+      "platform": "web",
       "bookingUrl": "https://tierrarejadapubpp.ezlinksgolf.com/index.html#/search",
       "earliestTime": "05:00",
       "latestTime": "15:00",
@@ -45,7 +45,7 @@
     },
     {
       "name": "LA City Golf",
-      "platform": "ezlinks",
+      "platform": "web",
       "bookingUrl": "https://cityoflapcp.ezlinksgolf.com/index.html#/search",
       "earliestTime": "05:00",
       "latestTime": "15:00",
