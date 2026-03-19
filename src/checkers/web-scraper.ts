@@ -442,10 +442,43 @@ export async function checkWebScraper(
       }
     }
 
-    // EZLinks SPA (#/search) is an Angular app that requires filling in the
-    // date picker and clicking Search before tee-time API calls fire.
+    // EZLinks SPA: page navigation gets Cloudflare clearance; call the
+    // search API from within the browser context (same origin + CF cookie)
+    // rather than trying to interact with Angular form elements.
     if (targetUrl.includes("ezlinksgolf.com")) {
-      await interactEZLinks(page, date);
+      const u = new URL(targetUrl);
+      const apiUrl = `${u.protocol}//${u.host}/api/search/search`;
+      const [year, month, day] = date.split("-");
+      const bodies = [
+        { date, holes: 18, players: 1 },
+        { date: `${month}/${day}/${year}`, holes: 18, players: 1 },
+        { searchDate: date, numberOfHoles: 18, numberOfPlayers: 1 },
+      ];
+
+      for (const body of bodies) {
+        const bodyStr = JSON.stringify(body);
+        console.log(`[web] ${course.name}: in-browser POST ${apiUrl} body=${bodyStr}`);
+        const result: unknown = await page.evaluate(async (url: string, bStr: string) => {
+          try {
+            const r = await fetch(url, {
+              method: "POST",
+              headers: { "content-type": "application/json", accept: "application/json, text/plain, */*" },
+              body: bStr,
+            });
+            if (!r.ok) return null;
+            return r.json();
+          } catch { return null; }
+        }, apiUrl, bodyStr);
+
+        if (result) {
+          const times = extractFromJson(result);
+          if (times && times.length > 0) {
+            console.log(`[web] ${course.name}: ${times.length} slot(s) on ${date}`);
+            return times.filter((t) => t.players > 0);
+          }
+        }
+      }
+      return []; // no times — do NOT fall through to DOM scraping
     } else {
       // Give SPAs a moment to finish rendering
       await new Promise((r) => setTimeout(r, 2_000));
